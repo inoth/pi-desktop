@@ -27,6 +27,11 @@ import CohereColorIcon from "@lobehub/icons/es/Cohere/components/Color";
 import PerplexityColorIcon from "@lobehub/icons/es/Perplexity/components/Color";
 import TogetherColorIcon from "@lobehub/icons/es/Together/components/Color";
 import GrokIcon from "@lobehub/icons/es/Grok/components/Mono";
+import AntGroupColorIcon from "@lobehub/icons/es/AntGroup/components/Color";
+import NvidiaColorIcon from "@lobehub/icons/es/Nvidia/components/Color";
+import OpenCodeIcon from "@lobehub/icons/es/OpenCode/components/Mono";
+import XiaomiMiMoIcon from "@lobehub/icons/es/XiaomiMiMo/components/Mono";
+import ZAIIcon from "@lobehub/icons/es/ZAI/components/Mono";
 
 type IconComponent = React.ComponentType<{ size?: number | string; style?: React.CSSProperties }>;
 
@@ -38,6 +43,7 @@ const PROVIDER_ICONS: Record<string, { Icon: IconComponent; hasColor: boolean }>
   "openai-codex":           { Icon: OpenAIIcon,           hasColor: false },
   "google":                 { Icon: GoogleColorIcon,      hasColor: true },
   "google-vertex":          { Icon: GoogleColorIcon,      hasColor: true },
+  "ant-ling":               { Icon: AntGroupColorIcon,    hasColor: true },
   "deepseek":               { Icon: DeepSeekColorIcon,    hasColor: true },
   "groq":                   { Icon: GroqIcon,             hasColor: false },
   "mistral":                { Icon: MistralColorIcon,     hasColor: true },
@@ -58,8 +64,17 @@ const PROVIDER_ICONS: Record<string, { Icon: IconComponent; hasColor: boolean }>
   "amazon-bedrock":         { Icon: AwsColorIcon,         hasColor: true },
   "azure-openai-responses": { Icon: AzureColorIcon,       hasColor: true },
   "kimi-coding":            { Icon: KimiColorIcon,        hasColor: true },
+  "nvidia":                 { Icon: NvidiaColorIcon,      hasColor: true },
+  "opencode":               { Icon: OpenCodeIcon,         hasColor: false },
+  "opencode-go":            { Icon: OpenCodeIcon,         hasColor: false },
   "qwen":                   { Icon: QwenColorIcon,        hasColor: true },
-  "zai":                    { Icon: ZhipuColorIcon,       hasColor: true },
+  "xiaomi":                 { Icon: XiaomiMiMoIcon,       hasColor: false },
+  "xiaomi-token-plan-ams":  { Icon: XiaomiMiMoIcon,       hasColor: false },
+  "xiaomi-token-plan-cn":   { Icon: XiaomiMiMoIcon,       hasColor: false },
+  "xiaomi-token-plan-sgp":  { Icon: XiaomiMiMoIcon,       hasColor: false },
+  "zai":                    { Icon: ZAIIcon,              hasColor: false },
+  "zai-coding-cn":          { Icon: ZAIIcon,              hasColor: false },
+  "zhipu":                  { Icon: ZhipuColorIcon,       hasColor: true },
   "cohere":                 { Icon: CohereColorIcon,      hasColor: true },
   "perplexity":             { Icon: PerplexityColorIcon,  hasColor: true },
   "together":               { Icon: TogetherColorIcon,    hasColor: true },
@@ -1081,7 +1096,36 @@ function ApiKeyDetail({ provider, onRefresh }: { provider: ApiKeyProvider; onRef
 
 function ProviderIcon({ id, size }: { id: string; size: number }) {
   const pi = PROVIDER_ICONS[id];
-  if (!pi) return null;
+  if (!pi) {
+    const label = id
+      .split(/[-_]/)
+      .filter(Boolean)
+      .slice(0, 2)
+      .map((part) => part[0])
+      .join("")
+      .toUpperCase() || "?";
+    return (
+      <span
+        aria-hidden="true"
+        style={{
+          width: size,
+          height: size,
+          border: "1px solid var(--border)",
+          borderRadius: 4,
+          color: "var(--text-dim)",
+          display: "inline-flex",
+          alignItems: "center",
+          justifyContent: "center",
+          flexShrink: 0,
+          fontSize: Math.max(8, Math.floor(size * 0.42)),
+          fontWeight: 700,
+          lineHeight: 1,
+        }}
+      >
+        {label}
+      </span>
+    );
+  }
   // Color icons: self-colored SVG, no wrapper needed
   if (pi.hasColor) return <pi.Icon size={size} />;
   // Mono icons: use currentColor so they adapt to light/dark theme
