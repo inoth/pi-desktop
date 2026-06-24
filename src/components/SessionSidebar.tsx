@@ -219,9 +219,7 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
   const loadSessions = useCallback(async (showLoading = false) => {
     try {
       if (showLoading) setLoading(true);
-      const res = await fetch("/api/sessions");
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      const data = await res.json() as { sessions: SessionInfo[] };
+      const data = await window.electron.invoke('get-sessions');
       setAllSessions(data.sessions);
       setError(null);
       if (!showLoading) {
@@ -911,11 +909,7 @@ function SessionItem({
     setRenaming(false);
     if (name === (session.name ?? "")) return;
     try {
-      await fetch(`/api/sessions/${encodeURIComponent(session.id)}`, {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ name }),
-      });
+      await window.electron.invoke('update-session', session.id, { name });
       onRenamed?.();
     } catch {
       // ignore
@@ -932,7 +926,7 @@ function SessionItem({
     setConfirmDelete(false);
     setDeleting(true);
     try {
-      await fetch(`/api/sessions/${encodeURIComponent(session.id)}`, { method: "DELETE" });
+      await window.electron.invoke('delete-session', session.id);
       onDeleted?.(session.id);
     } catch {
       setDeleting(false);

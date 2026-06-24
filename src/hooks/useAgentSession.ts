@@ -177,11 +177,8 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
   const loadSession = useCallback(async (sid: string, showLoading = false, includeState = false) => {
     try {
       if (showLoading) setLoading(true);
-      const url = includeState
-        ? `/api/sessions/${encodeURIComponent(sid)}?includeState`
-        : `/api/sessions/${encodeURIComponent(sid)}`;
-      const res = await fetch(url);
-      if (res.status === 404) {
+      const data = (await window.electron.invoke('get-session', sid, includeState));
+      if (!data) {
         if (showLoading) {
           setData(null);
           setActiveLeafId(null);
@@ -190,8 +187,7 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
         }
         return null;
       }
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      const d = await res.json() as SessionData & { agentState?: { running: boolean; state?: { isStreaming?: boolean; isCompacting?: boolean; contextUsage?: { percent: number | null; contextWindow: number; tokens: number | null } | null; systemPrompt?: string; thinkingLevel?: string } } };
+      const d = data as SessionData & { agentState?: { running: boolean; state?: { isStreaming?: boolean; isCompacting?: boolean; contextUsage?: { percent: number | null; contextWindow: number; tokens: number | null } | null; systemPrompt?: string; thinkingLevel?: string } } };
       setData(d);
       setActiveLeafId(d.leafId);
       setMessages(d.context.messages);
@@ -213,12 +209,7 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
 
   const loadContext = useCallback(async (sid: string, leafId: string | null) => {
     try {
-      const url = leafId
-        ? `/api/sessions/${encodeURIComponent(sid)}/context?leafId=${encodeURIComponent(leafId)}`
-        : `/api/sessions/${encodeURIComponent(sid)}/context`;
-      const res = await fetch(url);
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      const d = await res.json() as { context: { messages: AgentMessage[]; entryIds: string[] } };
+      const d = (await window.electron.invoke('get-session-context', sid, leafId));
       setMessages(d.context.messages);
       setEntryIds(d.context.entryIds ?? []);
     } catch (e) {
@@ -689,7 +680,8 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
   // Load model list
   useEffect(() => {
     // 桌面端使用 IPC 调用
-    if (typeof window !== "undefined" && (window as any).electron) {
+    if (typeof window !== "undefined" && ('electron' in window)) {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       (window as any).electron.invoke('get-models').then((d: any) => {
         setModelNames(d.models);
         if (d.thinkingLevels) setModelThinkingLevels(d.thinkingLevels);
@@ -698,6 +690,7 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
           setModelList(d.modelList);
           if (isNew && d.modelList.length > 0) {
             const def = d.defaultModel;
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
             const match = def && d.modelList.find((m: any) => m.id === def.modelId && m.provider === def.provider);
             const selected = match
               ? { provider: match.provider, modelId: match.id }

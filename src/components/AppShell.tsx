@@ -223,7 +223,7 @@ export function AppShell() {
 
   const handleExportSession = useCallback(() => {
     if (!selectedSession) return;
-    window.location.href = `/api/sessions/${encodeURIComponent(selectedSession.id)}/export`;
+    window.electron.invoke('export-session', selectedSession.id);
   }, [selectedSession]);
 
   // Show chat area if a session is selected, or if we have a cwd to start a new session in

@@ -1,61 +1,14 @@
-const { app, BrowserWindow, ipcMain } = require('electron');
+/* eslint-disable @typescript-eslint/no-require-imports */
+const { app, BrowserWindow } = require('electron');
 const path = require('path');
+const { registerIpcHandlers } = require('./src/main/ipc-handlers.js');
 
 // 判断是否为开发环境 (这里简单用命令行参数判断)
 const isDev = process.argv.includes('--dev');
 
-// 动态导入 ESM 模块
-async function loadPiModules() {
-  const agent = await import('@earendil-works/pi-coding-agent');
-  const ai = await import('@earendil-works/pi-ai');
-  return { ...agent, ...ai };
-}
-
 app.whenReady().then(() => {
   // 注册 IPC Handlers
-  ipcMain.handle('get-models', async () => {
-    const nameMap = new Map();
-    let modelList = [];
-    let defaultModel = null;
-    const thinkingLevels = {};
-    const thinkingLevelMaps = {};
-
-    try {
-      const { AuthStorage, ModelRegistry, SettingsManager, getAgentDir, getSupportedThinkingLevels } = await loadPiModules();
-      const agentDir = getAgentDir();
-      const authStorage = AuthStorage.create();
-      const registry = ModelRegistry.create(authStorage);
-      const available = registry.getAvailable();
-      modelList = available.map((m) => ({
-        id: m.id,
-        name: m.name,
-        provider: m.provider,
-      }));
-      for (const m of available) {
-        const key = `${m.provider}:${m.id}`;
-        nameMap.set(key, m.name);
-        thinkingLevels[key] = getSupportedThinkingLevels(m);
-        if (m.thinkingLevelMap) thinkingLevelMaps[key] = m.thinkingLevelMap;
-      }
-
-      const settings = SettingsManager.create(process.cwd(), agentDir);
-      const provider = settings.getDefaultProvider();
-      const modelId = settings.getDefaultModel();
-      if (provider) {
-        defaultModel = { provider, modelId: modelId ?? available[0]?.id ?? "" };
-      }
-    } catch (e) {
-      console.error("Failed to get models:", e);
-    }
-
-    return { 
-      models: Object.fromEntries(nameMap), 
-      modelList, 
-      defaultModel, 
-      thinkingLevels, 
-      thinkingLevelMaps 
-    };
-  });
+  registerIpcHandlers();
 
   function createWindow() {
     const win = new BrowserWindow({
