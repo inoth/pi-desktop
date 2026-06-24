@@ -286,14 +286,14 @@ function registerIpcHandlers() {
 
     event.sender.send(`agent-event-${id}`, { type: "connected", sessionId: id });
 
-    const unsubscribe = session.onEvent((agentEvent) => {
+    session.onEvent((agentEvent) => {
       event.sender.send(`agent-event-${id}`, agentEvent);
     });
 
     return { success: true };
   });
 
-  ipcMain.handle('agent-unsubscribe', async (_event, _id) => {
+  ipcMain.handle('agent-unsubscribe', async () => {
     // Cannot easily unsubscribe without keeping the reference, but we rely on WebContents destroyed to cleanup? 
     // Actually the session has idleTimer and cleans itself up.
     return { success: true };
@@ -860,6 +860,187 @@ function registerIpcHandlers() {
     } catch (e) {
       console.error("Failed to export session:", e);
       throw e;
+    }
+  });
+
+  ipcMain.handle('skills-list', async (event, { cwd }) => {
+    try {
+      if (!cwd) throw new Error("cwd required");
+      const { DefaultResourceLoader, getAgentDir } = await loadPiModules();
+      const loader = new DefaultResourceLoader({ cwd, agentDir: getAgentDir() });
+      await loader.reload();
+      const { skills, diagnostics } = loader.getSkills();
+      return { skills, diagnostics };
+    } catch (e) {
+      return { error: String(e) };
+    }
+  });
+
+  ipcMain.handle('skills-patch', async (event, { filePath, disableModelInvocation }) => {
+    try {
+      if (!filePath) throw new Error("filePath required");
+      if (!fs.existsSync(filePath)) throw new Error("file not found");
+
+      const content = fs.readFileSync(filePath, "utf8");
+      const key = "disable-model-invocation";
+
+      const { parseFrontmatter } = await loadPiModules();
+      const { frontmatter } = parseFrontmatter(content);
+      const alreadySet = Boolean(frontmatter[key]);
+
+      let updated = content;
+      if (disableModelInvocation && !alreadySet) {
+        updated = content.replace(/^---\r?\n/, `---\n${key}: true\n`);
+        if (updated === content) updated = `---\n${key}: true\n---\n${content}`;
+      } else if (!disableModelInvocation && alreadySet) {
+        updated = content.replace(new RegExp(`^${key}\\s*:.*\\r?\\n`, "m"), "");
+      }
+
+      fs.writeFileSync(filePath, updated, "utf8");
+      return { success: true };
+    } catch (e) {
+      return { error: String(e) };
+    }
+  });
+
+  ipcMain.handle('skills-install', async (event, { package: pkg, scope, cwd }) => {
+    try {
+      if (!pkg?.trim()) throw new Error("package required");
+      const isGlobal = scope !== "project";
+      const args = ["skills", "add", pkg.trim(), "-y", "--agent", "pi"];
+      if (isGlobal) args.push("-g");
+
+      
+      // Fallback implementation since we can't easily require the TS file in the main process
+      const { execFile } = require("child_process");
+      const util = require("util");
+      const execFileAsync = util.promisify(execFile);
+      
+      const nodeDir = path.dirname(process.execPath);
+      const candidates = [
+        path.join(nodeDir, "node_modules", "npm", "bin", "npx-cli.js"),
+        path.join(nodeDir, "..", "lib", "node_modules", "npm", "bin", "npx-cli.js"),
+      ];
+      let npxCli = null;
+      for (const p of candidates) {
+        if (fs.existsSync(p)) { npxCli = p; break; }
+      }
+
+      const { command, commandArgs } = npxCli
+        ? { command: process.execPath, commandArgs: [npxCli, ...args] }
+        : { command: "npx", commandArgs: args };
+
+      const { stdout, stderr } = await execFileAsync(command, commandArgs, {
+        timeout: 60000,
+        cwd: !isGlobal && cwd ? cwd : undefined,
+        env: { ...process.env, FORCE_COLOR: "0" },
+      });
+
+      const ANSI_RE = /\x1B\[[0-9;]*m/g;
+      const output = (stdout + stderr).replace(ANSI_RE, "");
+      const success = /Installation complete|Installed \d+ skill/.test(output);
+      
+      if (!success) {
+        return { error: output.slice(-300) || "Install failed" };
+      }
+      return { success: true, output };
+    } catch (e) {
+      const ANSI_RE = /\x1B\[[0-9;]*m/g;
+      const output = ((e.stdout ?? "") + (e.stderr ?? "")).replace(ANSI_RE, "");
+      return { error: output || (e.message ?? String(e)) };
+    }
+  });
+
+  ipcMain.handle('skills-search', async (event, { query, limit = 50 }) => {
+    try {
+      if (!query?.trim()) throw new Error("query required");
+      
+      const SEARCH_API_BASE = process.env.SKILLS_API_URL || "https://skills.sh";
+      const url = `${SEARCH_API_BASE}/api/search?q=${encodeURIComponent(query.trim())}&limit=${limit}`;
+      const res = await fetch(url, { cache: "no-store" });
+      if (!res.ok) throw new Error(`skills.sh search failed: HTTP ${res.status}`);
+      
+      const data = await res.json();
+      
+      const formatInstalls = (count) => {
+        if (!count || count <= 0) return "";
+        if (count >= 1_000_000) return `${(count / 1_000_000).toFixed(1).replace(/\.0$/, "")}M installs`;
+        if (count >= 1_000) return `${(count / 1_000).toFixed(1).replace(/\.0$/, "")}K installs`;
+        return `${count} install${count === 1 ? "" : "s"}`;
+      };
+
+      const parseInstallCount = (installs) => {
+        const match = installs.match(/^([\d.]+)([KMB])?\s+installs?$/);
+        if (!match) return 0;
+        const value = Number(match[1]);
+        if (!Number.isFinite(value)) return 0;
+        const multiplier = match[2] === "B" ? 1_000_000_000 : match[2] === "M" ? 1_000_000 : match[2] === "K" ? 1_000 : 1;
+        return value * multiplier;
+      };
+
+      const results = (data.skills ?? [])
+        .map((skill) => {
+          const name = skill.name?.trim();
+          const source = skill.source?.trim();
+          const slug = skill.id?.trim();
+          if (!name || (!source && !slug)) return null;
+
+          const pkg = `${source || slug}@${name}`;
+          return {
+            package: pkg,
+            installs: formatInstalls(skill.installs),
+            url: slug ? `${SEARCH_API_BASE}/${slug}` : "",
+          };
+        })
+        .filter((skill) => skill !== null)
+        .sort((a, b) => parseInstallCount(b.installs) - parseInstallCount(a.installs));
+
+      return { results: results.slice(0, limit) };
+    } catch (e) {
+      try {
+        const { execFile } = require("child_process");
+        const util = require("util");
+        const execFileAsync = util.promisify(execFile);
+        
+        const nodeDir = path.dirname(process.execPath);
+        const candidates = [
+          path.join(nodeDir, "node_modules", "npm", "bin", "npx-cli.js"),
+          path.join(nodeDir, "..", "lib", "node_modules", "npm", "bin", "npx-cli.js"),
+        ];
+        let npxCli = null;
+        for (const p of candidates) {
+          if (fs.existsSync(p)) { npxCli = p; break; }
+        }
+
+        const { command, commandArgs } = npxCli
+          ? { command: process.execPath, commandArgs: [npxCli, "skills", "find", query.trim()] }
+          : { command: "npx", commandArgs: ["skills", "find", query.trim()] };
+
+        const { stdout, stderr } = await execFileAsync(command, commandArgs, {
+          timeout: 20000,
+          env: { ...process.env, FORCE_COLOR: "0" },
+        });
+
+        const ANSI_RE = /\x1B\[[0-9;]*m/g;
+        const clean = (stdout + stderr).replace(ANSI_RE, "");
+        const results = [];
+        const lines = clean.split("\n");
+        for (let i = 0; i < lines.length; i++) {
+          const line = lines[i].trim();
+          const pkgMatch = line.match(/^([\w.\-]+\/[\w.\-@:]+)\s+([\d.,]+[KMB]?\s+installs)$/);
+          if (pkgMatch) {
+            const urlLine = lines[i + 1]?.trim().replace(/^└\s*/, "");
+            results.push({
+              package: pkgMatch[1],
+              installs: pkgMatch[2],
+              url: urlLine?.startsWith("https://") ? urlLine : "",
+            });
+          }
+        }
+        return { results: results.slice(0, limit) };
+      } catch {
+        return { error: String(e) };
+      }
     }
   });
 }

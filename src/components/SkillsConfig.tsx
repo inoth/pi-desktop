@@ -1,7 +1,11 @@
 "use client";
 
 import { useState, useEffect, useCallback, useRef } from "react";
-import type { SkillSearchResult } from "@/app/api/skills/search/route";
+export interface SkillSearchResult {
+  package: string;
+  installs: string;
+  url: string;
+}
 
 interface Skill {
   name: string;
@@ -206,15 +210,7 @@ function AddSkillPanel({
     setSearchError(null);
     setResults([]);
     try {
-      const res = await fetch("/api/skills/search", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ query: q.trim() }),
-      });
-      const d = (await res.json()) as {
-        results?: SkillSearchResult[];
-        error?: string;
-      };
+      const d = await window.electron.invoke("skills-search", { query: q.trim() });
       if (d.error) {
         setSearchError(d.error);
         return;
@@ -233,14 +229,9 @@ function AddSkillPanel({
       setInstalling(pkg);
       setInstallError(null);
       try {
-        const res = await fetch("/api/skills/install", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ package: pkg, scope, cwd }),
-        });
-        const d = (await res.json()) as { success?: boolean; error?: string };
-        if (!res.ok || d.error) {
-          setInstallError(d.error ?? `HTTP ${res.status}`);
+        const d = await window.electron.invoke("skills-install", { package: pkg, scope, cwd });
+        if (d.error) {
+          setInstallError(d.error);
           return;
         }
         setInstalledPkgs((prev) => new Set(prev).add(pkg));
@@ -524,8 +515,7 @@ export function SkillsConfig({
   const loadSkills = useCallback(() => {
     setLoading(true);
     setError(null);
-    fetch(`/api/skills?cwd=${encodeURIComponent(cwd)}`)
-      .then((r) => r.json())
+    window.electron.invoke("skills-list", { cwd })
       .then((d: { skills?: Skill[]; error?: string }) => {
         if (d.error) {
           setError(d.error);
@@ -548,17 +538,12 @@ export function SkillsConfig({
     setToggling((s) => new Set(s).add(skill.filePath));
     setSaveError(null);
     try {
-      const res = await fetch("/api/skills", {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          filePath: skill.filePath,
-          disableModelInvocation: next,
-        }),
+      const d = await window.electron.invoke("skills-patch", {
+        filePath: skill.filePath,
+        disableModelInvocation: next,
       });
-      const d = (await res.json()) as { success?: boolean; error?: string };
-      if (!res.ok || d.error) {
-        setSaveError(d.error ?? `HTTP ${res.status}`);
+      if (d.error) {
+        setSaveError(d.error);
         return;
       }
       setSkills((prev) =>
