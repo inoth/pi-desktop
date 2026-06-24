@@ -158,7 +158,7 @@ function PiAgentTitle() {
   const [scrambling, setScrambling] = useState(false);
   const revertTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  const target = showVersion ? `${process.env.NEXT_PUBLIC_APP_VERSION ?? "0.0.0"}p${process.env.NEXT_PUBLIC_PI_VERSION ?? "0.0.0"}` : "Pi Agent Web";
+  const target = showVersion ? `${process.env.NEXT_PUBLIC_APP_VERSION ?? "0.0.0"}p${process.env.NEXT_PUBLIC_PI_VERSION ?? "0.0.0"}` : "Pi Desktop";
   const display = useScramble(target, scrambling);
 
   const triggerScramble = useCallback((toVersion: boolean) => {
@@ -246,7 +246,7 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
   }, [explorerRefreshKey]);
 
   useEffect(() => {
-    fetch("/api/home").then((r) => r.json()).then((d: { home?: string }) => {
+    window.electron.invoke('home-dir').then((d: { home?: string }) => {
       if (d.home) setHomeDir(d.home);
     }).catch(() => {});
   }, []);
@@ -286,14 +286,9 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
     setCustomPathValidating(true);
     setCustomPathError(null);
     try {
-      const res = await fetch("/api/cwd/validate", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ cwd: path }),
-      });
-      const data = await res.json().catch(() => ({})) as { cwd?: string; error?: string };
-      if (!res.ok || data.error) {
-        setCustomPathError(data.error ?? `HTTP ${res.status}`);
+      const data = await window.electron.invoke('cwd-validate', path);
+      if (data.error) {
+        setCustomPathError(data.error);
         return;
       }
       setSelectedCwd(data.cwd ?? path);
@@ -309,8 +304,7 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
 
   const handleDefaultCwd = useCallback(async () => {
     try {
-      const res = await fetch("/api/default-cwd", { method: "POST" });
-      const data = await res.json() as { cwd?: string; error?: string };
+      const data = await window.electron.invoke('default-cwd');
       if (data.cwd) {
         setSelectedCwd(data.cwd);
         setCustomPathOpen(false);

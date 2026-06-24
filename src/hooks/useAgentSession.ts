@@ -740,44 +740,24 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
   // Load model list
   useEffect(() => {
     // 桌面端使用 IPC 调用
-    if (typeof window !== "undefined" && ('electron' in window)) {
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      (window as any).electron.invoke('get-models').then((d: any) => {
-        setModelNames(d.models);
-        if (d.thinkingLevels) setModelThinkingLevels(d.thinkingLevels);
-        if (d.thinkingLevelMaps) setModelThinkingLevelMaps(d.thinkingLevelMaps);
-        if (d.modelList) {
-          setModelList(d.modelList);
-          if (isNew && d.modelList.length > 0) {
-            const def = d.defaultModel;
-            // eslint-disable-next-line @typescript-eslint/no-explicit-any
-            const match = def && d.modelList.find((m: any) => m.id === def.modelId && m.provider === def.provider);
-            const selected = match
-              ? { provider: match.provider, modelId: match.id }
-              : { provider: d.modelList[0].provider, modelId: d.modelList[0].id };
-            setNewSessionModel(selected);
-          }
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    window.electron.invoke('get-models').then((d: any) => {
+      setModelNames(d.models);
+      if (d.thinkingLevels) setModelThinkingLevels(d.thinkingLevels);
+      if (d.thinkingLevelMaps) setModelThinkingLevelMaps(d.thinkingLevelMaps);
+      if (d.modelList) {
+        setModelList(d.modelList);
+        if (isNew && d.modelList.length > 0) {
+          const def = d.defaultModel;
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          const match = def && d.modelList.find((m: any) => m.id === def.modelId && m.provider === def.provider);
+          const selected = match
+            ? { provider: match.provider, modelId: match.id }
+            : { provider: d.modelList[0].provider, modelId: d.modelList[0].id };
+          setNewSessionModel(selected);
         }
-      }).catch(() => {});
-    } else {
-      // 降级回 Web 模式 (兼容开发调试)
-      fetch("/api/models").then((r) => r.json()).then((d: { models: Record<string, string>; modelList?: { id: string; name: string; provider: string }[]; defaultModel?: { provider: string; modelId: string } | null; thinkingLevels?: Record<string, string[]>; thinkingLevelMaps?: Record<string, Record<string, string | null>> }) => {
-        setModelNames(d.models);
-        if (d.thinkingLevels) setModelThinkingLevels(d.thinkingLevels);
-        if (d.thinkingLevelMaps) setModelThinkingLevelMaps(d.thinkingLevelMaps);
-        if (d.modelList) {
-          setModelList(d.modelList);
-          if (isNew && d.modelList.length > 0) {
-            const def = d.defaultModel;
-            const match = def && d.modelList.find((m) => m.id === def.modelId && m.provider === def.provider);
-            const selected = match
-              ? { provider: match.provider, modelId: match.id }
-              : { provider: d.modelList[0].provider, modelId: d.modelList[0].id };
-            setNewSessionModel(selected);
-          }
-        }
-      }).catch(() => {});
-    }
+      }
+    }).catch(() => {});
   }, [isNew, modelsRefreshKey, setNewSessionModel]);
 
   // Compact error auto-dismiss

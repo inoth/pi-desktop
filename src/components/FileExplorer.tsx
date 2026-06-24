@@ -29,10 +29,9 @@ interface Props {
 
 async function fetchEntries(dirPath: string): Promise<FileNode[]> {
   const encoded = encodeFilePathForApi(dirPath);
-  const res = await fetch(`/api/files/${encoded}?type=list`);
-  if (!res.ok) return [];
-  const data = await res.json() as { entries?: FileEntry[] };
-  return (data.entries ?? []).map((e) => ({
+  const res = await window.electron.invoke('list-dir', encoded);
+  if (res.error) return [];
+  return (res.entries ?? []).map((e: any) => ({
     name: e.name,
     fullPath: joinFilePath(dirPath, e.name),
     isDir: e.isDir,

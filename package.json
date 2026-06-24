@@ -1,7 +1,7 @@
 {
-  "name": "@agegr/pi-web",
+  "name": "pi-desktop",
   "version": "0.6.17",
-  "description": "Web UI for the pi coding agent",
+  "description": "Pi Desktop application",
   "license": "MIT",
   "bin": {
     "pi-web": "bin/pi-web.js"
@@ -17,11 +17,32 @@
     "package.json"
   ],
   "main": "main.js",
+  "build": {
+    "appId": "com.github.inoth.pi-desktop",
+    "productName": "Pi Desktop",
+    "directories": {
+      "output": "dist"
+    },
+    "files": [
+      "main.js",
+      "preload.js",
+      "src/main/**/*",
+      "out/**/*",
+      "package.json"
+    ],
+    "mac": {
+      "target": ["dmg"]
+    },
+    "win": {
+      "target": ["nsis"]
+    }
+  },
   "scripts": {
     "dev:next": "next dev -p 30141",
     "dev:electron": "wait-on http://localhost:30141 && electron . --dev",
     "dev": "concurrently -k \"npm run dev:next\" \"npm run dev:electron\"",
-    "build": "next build --webpack",
+    "build:next": "next build",
+    "build": "npm run build:next && electron-builder",
     "start": "next start -p 30141",
     "lint": "eslint .",
     "release": "npm version patch --no-git-tag-version && npm run build && npm publish --access public"

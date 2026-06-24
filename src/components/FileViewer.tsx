@@ -49,7 +49,7 @@ function DownloadLink({ filePath, label = "Download" }: { filePath: string; labe
   const encoded = encodeFilePathForApi(filePath);
   return (
     <a
-      href={`/api/files/${encoded}?type=read`}
+      href={`pi-file:///${encoded}?type=read`}
       download={getFileName(filePath)}
       style={{
         color: "var(--text-muted)",
@@ -309,7 +309,7 @@ function ImageViewer({ filePath, cwd }: { filePath: string; cwd?: string }) {
   const [size, setSize] = useState<number | null>(null);
   const [naturalSize, setNaturalSize] = useState<{ w: number; h: number } | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const esRef = useRef<EventSource | null>(null);
+  const unwatchRef = useRef<(() => void) | null>(null);
 
   const ext = getFileName(filePath).toLowerCase().split(".").pop() ?? "";
 
@@ -320,34 +320,46 @@ function ImageViewer({ filePath, cwd }: { filePath: string; cwd?: string }) {
     setError(null);
     setWatching(false);
 
-    if (esRef.current) {
-      esRef.current.close();
-      esRef.current = null;
+    if (unwatchRef.current) {
+      unwatchRef.current();
+      unwatchRef.current = null;
     }
 
     const encoded = encodeFilePathForApi(filePath);
-    const es = new EventSource(`/api/files/${encoded}?type=watch`);
-    esRef.current = es;
+    
+    // Request watch setup
+    window.electron.invoke('watch-file', encoded).then(res => {
+      if (res && res.success) {
+        setWatching(true);
+      }
+    });
 
-    es.addEventListener("connected", () => setWatching(true));
-    es.addEventListener("change", (e) => {
-      try {
-        const d = JSON.parse((e as MessageEvent).data) as { size?: number };
-        if (typeof d.size === "number") setSize(d.size);
-      } catch { /* ignore */ }
+    // Listen for changes
+    const unsubChange = window.electron.on(`file-changed-${encoded}`, (d: { size?: number }) => {
+      if (typeof d.size === "number") setSize(d.size);
       setBust((b) => b + 1);
     });
-    es.addEventListener("error", () => setWatching(false));
-    es.onerror = () => setWatching(false);
+
+    const unsubError = window.electron.on(`file-error-${encoded}`, () => {
+      setWatching(false);
+    });
+
+    unwatchRef.current = () => {
+      unsubChange();
+      unsubError();
+      window.electron.invoke('unwatch-file', encoded);
+    };
 
     return () => {
-      es.close();
-      esRef.current = null;
+      if (unwatchRef.current) {
+        unwatchRef.current();
+        unwatchRef.current = null;
+      }
     };
   }, [filePath]);
 
   const encoded = encodeFilePathForApi(filePath);
-  const src = `/api/files/${encoded}?type=read${bust ? `&v=${bust}` : ""}`;
+  const src = `pi-file:///${encoded}?type=read${bust ? `&v=${bust}` : ""}`;
 
   const formatSizeStr = size != null ? formatSize(size) : null;
 
@@ -443,7 +455,7 @@ function AudioViewer({ filePath, cwd }: { filePath: string; cwd?: string }) {
   const [size, setSize] = useState<number | null>(null);
   const [duration, setDuration] = useState<number | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const esRef = useRef<EventSource | null>(null);
+  const unwatchRef = useRef<(() => void) | null>(null);
 
   const ext = getFileName(filePath).toLowerCase().split(".").pop() ?? "";
 
@@ -454,36 +466,46 @@ function AudioViewer({ filePath, cwd }: { filePath: string; cwd?: string }) {
     setError(null);
     setWatching(false);
 
-    if (esRef.current) {
-      esRef.current.close();
-      esRef.current = null;
+    if (unwatchRef.current) {
+      unwatchRef.current();
+      unwatchRef.current = null;
     }
 
     const encoded = encodeFilePathForApi(filePath);
-    const es = new EventSource(`/api/files/${encoded}?type=watch`);
-    esRef.current = es;
+    
+    window.electron.invoke('watch-file', encoded).then(res => {
+      if (res && res.success) {
+        setWatching(true);
+      }
+    });
 
-    es.addEventListener("connected", () => setWatching(true));
-    es.addEventListener("change", (e) => {
-      try {
-        const d = JSON.parse((e as MessageEvent).data) as { size?: number };
-        if (typeof d.size === "number") setSize(d.size);
-      } catch { /* ignore */ }
+    const unsubChange = window.electron.on(`file-changed-${encoded}`, (d: { size?: number }) => {
+      if (typeof d.size === "number") setSize(d.size);
       setDuration(null);
       setError(null);
       setBust((b) => b + 1);
     });
-    es.addEventListener("error", () => setWatching(false));
-    es.onerror = () => setWatching(false);
+
+    const unsubError = window.electron.on(`file-error-${encoded}`, () => {
+      setWatching(false);
+    });
+
+    unwatchRef.current = () => {
+      unsubChange();
+      unsubError();
+      window.electron.invoke('unwatch-file', encoded);
+    };
 
     return () => {
-      es.close();
-      esRef.current = null;
+      if (unwatchRef.current) {
+        unwatchRef.current();
+        unwatchRef.current = null;
+      }
     };
   }, [filePath]);
 
   const encoded = encodeFilePathForApi(filePath);
-  const src = `/api/files/${encoded}?type=read${bust ? `&v=${bust}` : ""}`;
+  const src = `pi-file:///${encoded}?type=read${bust ? `&v=${bust}` : ""}`;
 
   return (
     <div style={{ display: "flex", flexDirection: "column", height: "100%", overflow: "hidden" }}>
@@ -559,14 +581,14 @@ function DocumentViewer({ filePath, cwd }: { filePath: string; cwd?: string }) {
   const [bust, setBust] = useState(0);
   const [size, setSize] = useState<number | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const esRef = useRef<EventSource | null>(null);
+  const unwatchRef = useRef<(() => void) | null>(null);
 
   const ext = getFileExt(filePath);
   const encoded = encodeFilePathForApi(filePath);
   const isPdf = ext === "pdf";
   const previewUrl = isPdf
-    ? `/api/files/${encoded}?type=read${bust ? `&v=${bust}` : ""}`
-    : `/api/files/${encoded}?type=preview${bust ? `&v=${bust}` : ""}`;
+    ? `pi-file:///${encoded}?type=read${bust ? `&v=${bust}` : ""}`
+    : `pi-file:///${encoded}?type=preview${bust ? `&v=${bust}` : ""}`;
 
   useEffect(() => {
     setBust(0);
@@ -574,13 +596,12 @@ function DocumentViewer({ filePath, cwd }: { filePath: string; cwd?: string }) {
     setError(null);
     setWatching(false);
 
-    if (esRef.current) {
-      esRef.current.close();
-      esRef.current = null;
+    if (unwatchRef.current) {
+      unwatchRef.current();
+      unwatchRef.current = null;
     }
 
-    fetch(`/api/files/${encoded}?type=meta`)
-      .then((r) => r.json())
+    window.electron.invoke('file-meta', encoded)
       .then((d: { size?: number; error?: string }) => {
         if (d.error) setError(d.error);
         if (typeof d.size === "number") {
@@ -592,30 +613,39 @@ function DocumentViewer({ filePath, cwd }: { filePath: string; cwd?: string }) {
       })
       .catch((e) => setError(String(e)));
 
-    const es = new EventSource(`/api/files/${encoded}?type=watch`);
-    esRef.current = es;
+    window.electron.invoke('watch-file', encoded).then(res => {
+      if (res && res.success) {
+        setWatching(true);
+      }
+    });
 
-    es.addEventListener("connected", () => setWatching(true));
-    es.addEventListener("change", (e) => {
-      try {
-        const d = JSON.parse((e as MessageEvent).data) as { size?: number };
-        if (typeof d.size === "number") {
-          setSize(d.size);
-          if (!isPdf && d.size > DOCX_PREVIEW_MAX_BYTES) {
-            setError("DOCX too large for preview (>10MB)");
-            return;
-          }
+    const unsubChange = window.electron.on(`file-changed-${encoded}`, (d: { size?: number }) => {
+      if (typeof d.size === "number") {
+        setSize(d.size);
+        if (!isPdf && d.size > DOCX_PREVIEW_MAX_BYTES) {
+          setError("DOCX too large for preview (>10MB)");
+          return;
         }
-      } catch { /* ignore */ }
+      }
       setError(null);
       setBust((b) => b + 1);
     });
-    es.addEventListener("error", () => setWatching(false));
-    es.onerror = () => setWatching(false);
+
+    const unsubError = window.electron.on(`file-error-${encoded}`, () => {
+      setWatching(false);
+    });
+
+    unwatchRef.current = () => {
+      unsubChange();
+      unsubError();
+      window.electron.invoke('unwatch-file', encoded);
+    };
 
     return () => {
-      es.close();
-      esRef.current = null;
+      if (unwatchRef.current) {
+        unwatchRef.current();
+        unwatchRef.current = null;
+      }
     };
   }, [encoded, isPdf]);
 
@@ -700,12 +730,11 @@ function TextFileViewer({ filePath, cwd }: Props) {
   const [wrapLines, setWrapLines] = useState(false);
   const [watching, setWatching] = useState(false);
   const [changeCount, setChangeCount] = useState(0);
-  const esRef = useRef<EventSource | null>(null);
+  const unwatchRef = useRef<(() => void) | null>(null);
 
   const fetchContent = useCallback((filePath: string, isRefresh = false) => {
     const encoded = encodeFilePathForApi(filePath);
-    return fetch(`/api/files/${encoded}?type=read`)
-      .then((r) => r.json())
+    return window.electron.invoke('read-file', encoded)
       .then((d: FileData & { error?: string }) => {
         if (d.error) {
           setError(d.error);
@@ -740,9 +769,9 @@ function TextFileViewer({ filePath, cwd }: Props) {
     setChangeCount(0);
     setWatching(false);
 
-    if (esRef.current) {
-      esRef.current.close();
-      esRef.current = null;
+    if (unwatchRef.current) {
+      unwatchRef.current();
+      unwatchRef.current = null;
     }
 
     fetchContent(filePath).then((d) => {
@@ -751,28 +780,32 @@ function TextFileViewer({ filePath, cwd }: Props) {
 
     // Set up SSE watch
     const encoded = encodeFilePathForApi(filePath);
-    const es = new EventSource(`/api/files/${encoded}?type=watch`);
-    esRef.current = es;
-
-    es.addEventListener("connected", () => {
-      setWatching(true);
+    
+    window.electron.invoke('watch-file', encoded).then(res => {
+      if (res && res.success) {
+        setWatching(true);
+      }
     });
 
-    es.addEventListener("change", () => {
+    const unsubChange = window.electron.on(`file-changed-${encoded}`, () => {
       fetchContent(filePath, true);
     });
 
-    es.addEventListener("error", () => {
+    const unsubError = window.electron.on(`file-error-${encoded}`, () => {
       setWatching(false);
     });
 
-    es.onerror = () => {
-      setWatching(false);
+    unwatchRef.current = () => {
+      unsubChange();
+      unsubError();
+      window.electron.invoke('unwatch-file', encoded);
     };
 
     return () => {
-      es.close();
-      esRef.current = null;
+      if (unwatchRef.current) {
+        unwatchRef.current();
+        unwatchRef.current = null;
+      }
     };
   }, [filePath, fetchContent]);
 
