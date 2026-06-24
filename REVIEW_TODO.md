@@ -11,7 +11,7 @@
     1. 在应用启动时或 `register-workspace` 时缓存 `allowedRoots` 列表，而不是每次实时读取。
     2. 将所有文件系统操作（如 `fs.readFileSync`, `fs.readdirSync`, `fs.statSync`）替换为非阻塞的异步版本 (`fs.promises.*`)。
 
-- [ ] **修复 React 状态提升导致的全局无意义重渲染**
+- [x] **修复 React 状态提升导致的全局无意义重渲染**
   - **文件**: `src/components/AppShell.tsx` & `src/components/ChatWindow.tsx`
   - **问题**: 模型流式输出时高频触发 `onSessionStatsChange` 和 `onContextUsageChange`，导致庞大的顶层组件 `AppShell` 持续重渲染，消耗 CPU 并可能引起 UI 掉帧。
   - **行动**: 将顶部 Token/Cost 统计栏抽离为独立组件，通过 Context、Zustand 或 EventEmitter 将更新直接发送到该子组件，从而切断对 `AppShell` 的渲染链。

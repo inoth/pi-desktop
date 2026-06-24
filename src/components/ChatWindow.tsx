@@ -9,6 +9,8 @@ import { useAgentSession, type AgentPhase } from "@/hooks/useAgentSession";
 import { useAudio } from "@/hooks/useAudio";
 import { useDragDrop } from "@/hooks/useDragDrop";
 
+import { updateSessionStats, updateContextUsage } from "./SessionStatsBar";
+
 interface Props {
   session: SessionInfo | null;
   newSessionCwd: string | null;
@@ -19,8 +21,6 @@ interface Props {
   chatInputRef?: React.RefObject<ChatInputHandle | null>;
   onBranchDataChange?: (tree: SessionTreeNode[], activeLeafId: string | null, onLeafChange: (leafId: string | null) => void) => void;
   onSystemPromptChange?: (prompt: string | null) => void;
-  onSessionStatsChange?: (stats: { tokens: { input: number; output: number; cacheRead: number; cacheWrite: number }; cost?: number } | null) => void;
-  onContextUsageChange?: (usage: { percent: number | null; contextWindow: number; tokens: number | null } | null) => void;
 }
 
 function phaseLabel(phase: AgentPhase): string {
@@ -90,7 +90,7 @@ function Typewriter({ phrases }: { phrases: string[] }) {
   );
 }
 
-export function ChatWindow({ session, newSessionCwd, onAgentEnd, onSessionCreated, onSessionForked, modelsRefreshKey, chatInputRef, onBranchDataChange, onSystemPromptChange, onSessionStatsChange, onContextUsageChange }: Props) {
+export function ChatWindow({ session, newSessionCwd, onAgentEnd, onSessionCreated, onSessionForked, modelsRefreshKey, chatInputRef, onBranchDataChange, onSystemPromptChange }: Props) {
   const {
     loading, error, messages, entryIds, streamState,
     agentRunning, modelNames, modelList, modelThinkingLevels, modelThinkingLevelMaps, toolPreset, thinkingLevel,
@@ -133,9 +133,9 @@ export function ChatWindow({ session, newSessionCwd, onAgentEnd, onSessionCreate
   const sessionStatsRef = useRef(sessionStats);
   sessionStatsRef.current = sessionStats;
   useEffect(() => {
-    onSessionStatsChange?.(sessionStatsRef.current);
-  }, [statsKey, onSessionStatsChange]);
-  useEffect(() => () => { onSessionStatsChange?.(null); }, [onSessionStatsChange]);
+    updateSessionStats(sessionStatsRef.current);
+  }, [statsKey]);
+  useEffect(() => () => { updateSessionStats(null); }, []);
 
   // Push context usage up to AppShell as well.
   const ctxKey = contextUsage
@@ -144,9 +144,9 @@ export function ChatWindow({ session, newSessionCwd, onAgentEnd, onSessionCreate
   const contextUsageRef = useRef(contextUsage);
   contextUsageRef.current = contextUsage;
   useEffect(() => {
-    onContextUsageChange?.(contextUsageRef.current);
-  }, [ctxKey, onContextUsageChange]);
-  useEffect(() => () => { onContextUsageChange?.(null); }, [onContextUsageChange]);
+    updateContextUsage(contextUsageRef.current);
+  }, [ctxKey]);
+  useEffect(() => () => { updateContextUsage(null); }, []);
 
   const onDrop = useCallback((files: File[]) => {
     chatInputRef?.current?.addImages(files);
