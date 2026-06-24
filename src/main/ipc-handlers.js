@@ -507,6 +507,315 @@ function registerIpcHandlers() {
     }
   });
 
+  ipcMain.handle('get-auth-providers', async () => {
+    try {
+      const { AuthStorage } = await loadPiModules();
+      const authStorage = AuthStorage.create();
+      const providers = authStorage.getOAuthProviders();
+
+      const EXCLUDED = new Set(["anthropic"]);
+      const DISPLAY_NAMES = {
+        "openai-codex": "ChatGPT Plus/Pro",
+        "github-copilot": "GitHub Copilot",
+      };
+
+      const result = await Promise.all(
+        providers
+          .filter((p) => !EXCLUDED.has(p.id))
+          .map(async (p) => {
+            const loggedIn = authStorage.has(p.id);
+            return {
+              id: p.id,
+              name: DISPLAY_NAMES[p.id] ?? p.name,
+              usesCallbackServer: p.usesCallbackServer ?? false,
+              loggedIn,
+            };
+          })
+      );
+
+      return { providers: result };
+    } catch (error) {
+      throw new Error(String(error));
+    }
+  });
+
+  ipcMain.handle('get-all-providers', async () => {
+    try {
+      const { AuthStorage, ModelRegistry } = await loadPiModules();
+      const OAUTH_PROVIDER_IDS = new Set(["anthropic", "github-copilot", "openai-codex"]);
+      
+      const authStorage = AuthStorage.create();
+      const registry = ModelRegistry.create(authStorage);
+      const all = registry.getAll();
+
+      const seen = new Set();
+      const result = [];
+
+      for (const m of all) {
+        if (seen.has(m.provider)) continue;
+        seen.add(m.provider);
+        if (OAUTH_PROVIDER_IDS.has(m.provider)) continue;
+        const status = registry.getProviderAuthStatus(m.provider);
+        if (status.source === "models_json_key") continue;
+        const displayName = registry.getProviderDisplayName(m.provider);
+        const modelCount = all.filter((x) => x.provider === m.provider).length;
+        result.push({
+          id: m.provider,
+          displayName,
+          configured: status.configured,
+          source: status.source,
+          modelCount,
+        });
+      }
+
+      return { providers: result };
+    } catch (error) {
+      throw new Error(String(error));
+    }
+  });
+
+  const activeTokens = new Set();
+  const loginCallbacksRegistry = new Map();
+
+  ipcMain.handle('auth-login', async (event, provider) => {
+    try {
+      const { AuthStorage } = await loadPiModules();
+      const authStorage = AuthStorage.create();
+      const providers = authStorage.getOAuthProviders();
+      const providerInfo = providers.find((p) => p.id === provider);
+      
+      if (!providerInfo) {
+        throw new Error(`Unknown provider: ${provider}`);
+      }
+
+      let pendingManualRequest;
+
+      const createClientInputRequest = () => {
+        const token = `${provider}-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+        activeTokens.add(token);
+
+        const promise = new Promise((resolve, reject) => {
+          loginCallbacksRegistry.set(token, {
+            resolve: (value) => {
+              activeTokens.delete(token);
+              loginCallbacksRegistry.delete(token);
+              resolve(value);
+            },
+            reject: (error) => {
+              activeTokens.delete(token);
+              loginCallbacksRegistry.delete(token);
+              reject(error);
+            },
+          });
+        });
+
+        return { token, promise };
+      };
+
+      const getManualInputRequest = () => {
+        if (!pendingManualRequest) {
+          pendingManualRequest = createClientInputRequest();
+          pendingManualRequest.promise
+            .finally(() => {
+              pendingManualRequest = undefined;
+            })
+            .catch(() => {});
+        }
+        return pendingManualRequest;
+      };
+
+      const cleanup = () => {
+        for (const token of activeTokens) {
+          loginCallbacksRegistry.get(token)?.reject(new Error("Login cancelled"));
+          loginCallbacksRegistry.delete(token);
+        }
+        activeTokens.clear();
+      };
+
+      const abort = new AbortController();
+      // Listen for window close or other cancels
+      event.sender.once('destroyed', cleanup);
+
+      try {
+        await authStorage.login(provider, {
+          onAuth: (info) => {
+            const request = getManualInputRequest();
+            event.sender.send(`auth-progress-${provider}`, {
+              type: "auth",
+              url: info.url,
+              instructions: info.instructions ?? null,
+              token: request.token,
+            });
+          },
+          onDeviceCode: (info) => {
+            event.sender.send(`auth-progress-${provider}`, {
+              type: "device_code",
+              userCode: info.userCode,
+              verificationUri: info.verificationUri,
+              intervalSeconds: info.intervalSeconds ?? null,
+              expiresInSeconds: info.expiresInSeconds ?? null,
+            });
+          },
+          onPrompt: async (prompt) => {
+            const request = getManualInputRequest();
+            event.sender.send(`auth-progress-${provider}`, {
+              type: "prompt_request",
+              message: prompt.message,
+              placeholder: prompt.placeholder ?? null,
+              token: request.token,
+            });
+            const value = await request.promise;
+            return value;
+          },
+          onProgress: (message) => {
+            event.sender.send(`auth-progress-${provider}`, { type: "progress", message });
+          },
+          onSelect: async (prompt) => {
+            const request = createClientInputRequest();
+            event.sender.send(`auth-progress-${provider}`, {
+              type: "select_request",
+              message: prompt.message,
+              options: prompt.options,
+              token: request.token,
+            });
+            const value = await request.promise;
+            return value || undefined;
+          },
+          onManualCodeInput: () => getManualInputRequest().promise,
+          signal: abort.signal,
+        });
+
+        event.sender.send(`auth-progress-${provider}`, { type: "success" });
+        return { ok: true };
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        if (msg !== "Login cancelled") {
+          event.sender.send(`auth-progress-${provider}`, { type: "error", message: msg });
+        } else {
+          event.sender.send(`auth-progress-${provider}`, { type: "cancelled" });
+        }
+        throw err;
+      } finally {
+        cleanup();
+      }
+    } catch (error) {
+      throw new Error(String(error));
+    }
+  });
+
+  ipcMain.handle('submit-auth-code', async (event, { provider, token, code }) => {
+    if (!token || !code) {
+      throw new Error("token and code required");
+    }
+
+    const callbacks = loginCallbacksRegistry.get(token);
+    if (!callbacks) {
+      throw new Error("No pending login for token");
+    }
+    
+    if (!token.startsWith(`${provider}-`)) {
+      throw new Error("Token does not match provider");
+    }
+
+    callbacks.resolve(code);
+    loginCallbacksRegistry.delete(token);
+    return { ok: true, provider };
+  });
+
+  ipcMain.handle('auth-logout', async (event, provider) => {
+    try {
+      const { AuthStorage } = await loadPiModules();
+      const authStorage = AuthStorage.create();
+      const providers = authStorage.getOAuthProviders();
+      if (!providers.find((p) => p.id === provider)) {
+        throw new Error(`Unknown provider: ${provider}`);
+      }
+      authStorage.logout(provider);
+      return { ok: true };
+    } catch (error) {
+      throw new Error(String(error));
+    }
+  });
+
+  ipcMain.handle('get-api-key-status', async (event, provider) => {
+    try {
+      const { AuthStorage, ModelRegistry } = await loadPiModules();
+      const authStorage = AuthStorage.create();
+      const registry = ModelRegistry.create(authStorage);
+      const status = registry.getProviderAuthStatus(provider);
+      const displayName = registry.getProviderDisplayName(provider);
+      const models = registry.getAll().filter((m) => m.provider === provider).length;
+      return { provider, displayName, configured: status.configured, source: status.source, models };
+    } catch (error) {
+      throw new Error(String(error));
+    }
+  });
+
+  ipcMain.handle('save-api-key', async (event, provider, apiKey) => {
+    try {
+      if (!apiKey || typeof apiKey !== "string" || !apiKey.trim()) {
+        throw new Error("apiKey is required");
+      }
+      const { AuthStorage } = await loadPiModules();
+      const authStorage = AuthStorage.create();
+      authStorage.set(provider, { type: "api_key", key: apiKey.trim() });
+      return { success: true };
+    } catch (error) {
+      throw new Error(String(error));
+    }
+  });
+
+  ipcMain.handle('delete-api-key', async (event, provider) => {
+    try {
+      const { AuthStorage } = await loadPiModules();
+      const authStorage = AuthStorage.create();
+      authStorage.remove(provider);
+      return { success: true };
+    } catch (error) {
+      throw new Error(String(error));
+    }
+  });
+
+  ipcMain.handle('get-models-config', async () => {
+    try {
+      const { getAgentDir } = await loadPiModules();
+      const modelsPath = path.join(getAgentDir(), "models.json");
+      if (!fs.existsSync(modelsPath)) {
+        return {};
+      }
+      return JSON.parse(fs.readFileSync(modelsPath, "utf-8"));
+    } catch (error) {
+      throw new Error(String(error));
+    }
+  });
+
+  ipcMain.handle('save-models-config', async (event, config) => {
+    try {
+      const { getAgentDir } = await loadPiModules();
+      const modelsPath = path.join(getAgentDir(), "models.json");
+      const dir = path.dirname(modelsPath);
+      if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+      
+      const tmpPath = `${modelsPath}.tmp`;
+      fs.writeFileSync(tmpPath, JSON.stringify(config, null, 2));
+      fs.renameSync(tmpPath, modelsPath);
+      
+      return { success: true };
+    } catch (error) {
+      throw new Error(String(error));
+    }
+  });
+
+  ipcMain.handle('test-model-config', async (event, { providerName, provider, model }) => {
+    try {
+      const { testModelConnection } = await loadPiModules();
+      const result = await testModelConnection(providerName, provider, model);
+      return { ok: true, ...result };
+    } catch (error) {
+      throw new Error(String(error));
+    }
+  });
+
   ipcMain.handle('export-session', async (event, id) => {
     try {
       const { shell } = require('electron');

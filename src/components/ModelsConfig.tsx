@@ -541,32 +541,21 @@ function ModelDetail({
     if (!model.id.trim() || testState.phase === "testing") return;
     setTestState({ phase: "testing" });
     try {
-      const res = await fetch("/api/models-config/test", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ providerName, provider, model }),
-      });
-      const d = await res.json() as {
-        ok?: boolean;
-        error?: string;
-        latencyMs?: number;
-        status?: number;
-        responseText?: string;
-      };
-      if (!res.ok || !d.ok) {
+      const res = await window.electron.invoke('test-model-config', { providerName, provider, model });
+      if (!res.ok) {
         setTestState({
           phase: "error",
-          message: d.error ?? `HTTP ${res.status}`,
-          latencyMs: d.latencyMs,
-          status: d.status,
+          message: res.error ?? `HTTP ${res.status}`,
+          latencyMs: res.latencyMs,
+          status: res.status,
         });
         return;
       }
       setTestState({
         phase: "success",
-        latencyMs: d.latencyMs,
-        status: d.status,
-        responseText: d.responseText,
+        latencyMs: res.latencyMs,
+        status: res.status,
+        responseText: res.responseText,
       });
     } catch (e) {
       setTestState({ phase: "error", message: e instanceof Error ? e.message : String(e) });
@@ -707,7 +696,7 @@ function ModelDetail({
 function OAuthDetail({ provider, onRefresh }: { provider: OAuthProvider; onRefresh: () => void }) {
   const [loginState, setLoginState] = useState<OAuthLoginState>({ phase: "idle" });
   const [inputValue, setInputValue] = useState("");
-  const eventSourceRef = useRef<EventSource | null>(null);
+  const unlistenRef = useRef<(() => void) | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
@@ -720,29 +709,30 @@ function OAuthDetail({ provider, onRefresh }: { provider: OAuthProvider; onRefre
   useEffect(() => {
     setLoginState({ phase: "idle" });
     setInputValue("");
-    eventSourceRef.current?.close();
-    eventSourceRef.current = null;
+    if (unlistenRef.current) {
+      unlistenRef.current();
+      unlistenRef.current = null;
+    }
   }, [provider.id]);
 
   useEffect(() => {
-    return () => { eventSourceRef.current?.close(); };
+    return () => {
+      if (unlistenRef.current) {
+        unlistenRef.current();
+        unlistenRef.current = null;
+      }
+    };
   }, []);
 
   const handleLogin = useCallback(() => {
-    eventSourceRef.current?.close();
+    if (unlistenRef.current) {
+      unlistenRef.current();
+      unlistenRef.current = null;
+    }
     setLoginState({ phase: "connecting" });
     setInputValue("");
 
-    const es = new EventSource(`/api/auth/login/${encodeURIComponent(provider.id)}`);
-    eventSourceRef.current = es;
-
-    es.onmessage = (e) => {
-      const data = JSON.parse(e.data) as {
-        type: string; url?: string; instructions?: string | null;
-        token?: string; message?: string; placeholder?: string | null;
-        userCode?: string; verificationUri?: string; intervalSeconds?: number | null; expiresInSeconds?: number | null;
-        options?: { id: string; label: string }[];
-      };
+    unlistenRef.current = window.electron.on(`auth-progress-${provider.id}`, (data: any) => {
       if (data.type === "auth") {
         setLoginState({ phase: "auth", url: data.url!, instructions: data.instructions ?? null, token: data.token! });
         window.open(data.url!, "_blank", "noopener,noreferrer");
@@ -762,25 +752,38 @@ function OAuthDetail({ provider, onRefresh }: { provider: OAuthProvider; onRefre
       } else if (data.type === "progress") {
         setLoginState({ phase: "progress", message: data.message! });
       } else if (data.type === "success") {
-        es.close();
+        if (unlistenRef.current) {
+          unlistenRef.current();
+          unlistenRef.current = null;
+        }
         setLoginState({ phase: "success" });
         onRefresh();
       } else if (data.type === "error") {
-        es.close();
+        if (unlistenRef.current) {
+          unlistenRef.current();
+          unlistenRef.current = null;
+        }
         setLoginState({ phase: "error", message: data.message! });
       } else if (data.type === "cancelled") {
-        es.close();
+        if (unlistenRef.current) {
+          unlistenRef.current();
+          unlistenRef.current = null;
+        }
         setLoginState({ phase: "idle" });
       }
-    };
-    es.onerror = () => {
-      es.close();
-      setLoginState((prev) => prev.phase === "success" ? prev : { phase: "error", message: "Connection lost" });
-    };
+    });
+
+    window.electron.invoke("auth-login", provider.id).catch((e: any) => {
+      setLoginState((prev) => prev.phase === "success" ? prev : { phase: "error", message: e.message || "Connection lost" });
+      if (unlistenRef.current) {
+        unlistenRef.current();
+        unlistenRef.current = null;
+      }
+    });
   }, [provider.id, onRefresh]);
 
   const handleLogout = useCallback(async () => {
-    await fetch(`/api/auth/logout/${encodeURIComponent(provider.id)}`, { method: "POST" });
+    await window.electron.invoke('auth-logout', provider.id);
     setLoginState({ phase: "idle" });
     onRefresh();
   }, [provider.id, onRefresh]);
@@ -789,18 +792,13 @@ function OAuthDetail({ provider, onRefresh }: { provider: OAuthProvider; onRefre
     if (!code.trim()) return;
     setLoginState({ phase: "progress", message: "Verifying…" });
     try {
-      const res = await fetch(`/api/auth/login/${encodeURIComponent(provider.id)}`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ token, code: code.trim() }),
-      });
+      const res = await window.electron.invoke('submit-auth-code', { provider: provider.id, token, code: code.trim() });
       if (!res.ok) {
-        const d = await res.json().catch(() => ({})) as { error?: string };
-        setLoginState({ phase: "error", message: d.error ?? `Server error ${res.status}` });
+        setLoginState({ phase: "error", message: `Server error` });
         return;
       }
       setInputValue("");
-      // Success path: SSE stream will emit "success" and update state
+      // Success path: IPC stream will emit "success" and update state
     } catch (e) {
       setLoginState({ phase: "error", message: e instanceof Error ? e.message : "Network error" });
     }
@@ -809,14 +807,9 @@ function OAuthDetail({ provider, onRefresh }: { provider: OAuthProvider; onRefre
   const submitSelection = useCallback(async (token: string, value: string) => {
     setLoginState({ phase: "progress", message: "Continuing…" });
     try {
-      const res = await fetch(`/api/auth/login/${encodeURIComponent(provider.id)}`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ token, code: value }),
-      });
+      const res = await window.electron.invoke('submit-auth-code', { provider: provider.id, token, code: value });
       if (!res.ok) {
-        const d = await res.json().catch(() => ({})) as { error?: string };
-        setLoginState({ phase: "error", message: d.error ?? `Server error ${res.status}` });
+        setLoginState({ phase: "error", message: `Server error` });
       }
     } catch (e) {
       setLoginState({ phase: "error", message: e instanceof Error ? e.message : "Network error" });
@@ -933,7 +926,13 @@ function OAuthDetail({ provider, onRefresh }: { provider: OAuthProvider; onRefre
       <div style={{ display: "flex", gap: 8 }}>
         {isWorking ? (
           <button
-            onClick={() => { eventSourceRef.current?.close(); setLoginState({ phase: "idle" }); }}
+            onClick={() => {
+              if (unlistenRef.current) {
+                unlistenRef.current();
+                unlistenRef.current = null;
+              }
+              setLoginState({ phase: "idle" });
+            }}
             style={{ padding: "5px 12px", background: "none", border: "1px solid var(--border)", borderRadius: 5, color: "var(--text-muted)", cursor: "pointer", fontSize: 12 }}
           >
             Cancel
@@ -983,22 +982,17 @@ function ApiKeyDetail({ provider, onRefresh }: { provider: ApiKeyProvider; onRef
     setError(null);
     setSavedOk(false);
     try {
-      const res = await fetch(`/api/auth/api-key/${encodeURIComponent(provider.id)}`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ apiKey: apiKey.trim() }),
-      });
-      const d = await res.json() as { success?: boolean; error?: string };
-      if (!res.ok || d.error) {
-        setError(d.error ?? `HTTP ${res.status}`);
-      } else {
+      const res = await window.electron.invoke('save-api-key', provider.id, apiKey.trim());
+      if (res.success) {
         setApiKey("");
         setSavedOk(true);
         setTimeout(() => setSavedOk(false), 2000);
         onRefresh();
+      } else {
+        setError(`Failed to save API key`);
       }
     } catch (e) {
-      setError(String(e));
+      setError(e instanceof Error ? e.message : String(e));
     } finally {
       setSaving(false);
     }
@@ -1008,12 +1002,14 @@ function ApiKeyDetail({ provider, onRefresh }: { provider: ApiKeyProvider; onRef
     setRemoving(true);
     setError(null);
     try {
-      const res = await fetch(`/api/auth/api-key/${encodeURIComponent(provider.id)}`, { method: "DELETE" });
-      const d = await res.json() as { success?: boolean; error?: string };
-      if (!res.ok || d.error) setError(d.error ?? `HTTP ${res.status}`);
-      else onRefresh();
+      const res = await window.electron.invoke('delete-api-key', provider.id);
+      if (res.success) {
+        onRefresh();
+      } else {
+        setError(`Failed to remove API key`);
+      }
     } catch (e) {
-      setError(String(e));
+      setError(e instanceof Error ? e.message : String(e));
     } finally {
       setRemoving(false);
     }
@@ -1281,23 +1277,20 @@ export function ModelsConfig({ onClose }: { onClose: () => void }) {
   const [pickerOpen, setPickerOpen] = useState(false);
 
   const loadOAuthProviders = useCallback(() => {
-    fetch("/api/auth/providers")
-      .then((r) => r.json())
-      .then((d: { providers: OAuthProvider[] }) => setOauthProviders(d.providers))
+    window.electron.invoke('get-auth-providers')
+      .then((d: any) => setOauthProviders(d.providers))
       .catch(() => {});
   }, []);
 
   const loadApiKeyProviders = useCallback(() => {
-    fetch("/api/auth/all-providers")
-      .then((r) => r.json())
-      .then((d: { providers: ApiKeyProvider[] }) => setApiKeyProviders(d.providers))
+    window.electron.invoke('get-all-providers')
+      .then((d: any) => setApiKeyProviders(d.providers))
       .catch(() => {});
   }, []);
 
   useEffect(() => {
-    fetch("/api/models-config")
-      .then((r) => r.json())
-      .then((d: ModelsJson) => {
+    window.electron.invoke('get-models-config')
+      .then((d: any) => {
         const normalized = d.providers ? d : { ...d, providers: {} };
         setConfig(normalized);
         const keys = Object.keys(normalized.providers ?? {});
@@ -1387,16 +1380,15 @@ export function ModelsConfig({ onClose }: { onClose: () => void }) {
     setSaveError(null);
     setSavedOk(false);
     try {
-      const res = await fetch("/api/models-config", {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(config),
-      });
-      const d = await res.json() as { success?: boolean; error?: string };
-      if (!res.ok || d.error) setSaveError(d.error ?? `HTTP ${res.status}`);
-      else { setSavedOk(true); setTimeout(() => setSavedOk(false), 2000); }
+      const res = await window.electron.invoke('save-models-config', config);
+      if (res.success) {
+        setSavedOk(true);
+        setTimeout(() => setSavedOk(false), 2000);
+      } else {
+        setSaveError(res.error ?? `Save failed`);
+      }
     } catch (e) {
-      setSaveError(String(e));
+      setSaveError(e instanceof Error ? e.message : String(e));
     } finally {
       setSaving(false);
     }
