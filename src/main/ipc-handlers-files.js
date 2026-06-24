@@ -94,21 +94,28 @@ function documentPreviewKind(filePath) {
 // 维护当前活跃的、被授权的工作区列表
 const activeAllowedWorkspaces = new Set();
 
+let cachedDefaultRoots = null;
+
 async function getAllowedRoots() {
-  const roots = new Set(activeAllowedWorkspaces);
-  
-  // 默认允许访问系统的临时沙盒目录 (Pi 自动生成的)
-  const home = os.homedir();
-  try {
-    for (const name of fs.readdirSync(home)) {
-      if (/^pi-cwd-\d{8}$/.test(name)) {
-        roots.add(path.join(home, name));
+  if (cachedDefaultRoots === null) {
+    cachedDefaultRoots = new Set();
+    const home = os.homedir();
+    try {
+      const names = await fs.promises.readdir(home);
+      for (const name of names) {
+        if (/^pi-cwd-\d{8}$/.test(name)) {
+          cachedDefaultRoots.add(path.join(home, name));
+        }
       }
+    } catch {
+      // ignore
     }
-  } catch {
-    // ignore
   }
 
+  const roots = new Set(activeAllowedWorkspaces);
+  for (const root of cachedDefaultRoots) {
+    roots.add(root);
+  }
   return roots;
 }
 
@@ -158,7 +165,7 @@ function registerFileIpcHandlers() {
       
       let stat;
       try {
-        stat = fs.statSync(finalCwd);
+        stat = await fs.promises.stat(finalCwd);
       } catch {
         return { error: `Directory does not exist: ${cwd}` };
       }
@@ -175,7 +182,7 @@ function registerFileIpcHandlers() {
     try {
       const date = new Date().toISOString().slice(0, 10).replace(/-/g, "");
       const dir = path.join(os.homedir(), `pi-cwd-${date}`);
-      fs.mkdirSync(dir, { recursive: true });
+      await fs.promises.mkdir(dir, { recursive: true });
       return { cwd: dir };
     } catch (err) {
       return { error: String(err) };
@@ -195,20 +202,20 @@ function registerFileIpcHandlers() {
       
       let stat;
       try {
-        stat = fs.statSync(filePath);
+        stat = await fs.promises.stat(filePath);
       } catch {
         return { error: "Not found" };
       }
       
       if (!stat.isDirectory()) return { error: "Not a directory" };
       
-      const names = fs.readdirSync(filePath);
-      const entries = names
+      const names = await fs.promises.readdir(filePath);
+      const entriesRaw = await Promise.all(names
         .filter((name) => !IGNORED_NAMES.has(name) && !IGNORED_SUFFIXES.some((s) => name.endsWith(s)))
-        .map((name) => {
+        .map(async (name) => {
           const full = path.join(filePath, name);
           try {
-            const s = fs.statSync(full);
+            const s = await fs.promises.stat(full);
             return {
               name,
               isDir: s.isDirectory(),
@@ -219,11 +226,12 @@ function registerFileIpcHandlers() {
             return null;
           }
         })
-        .filter(Boolean)
-        .sort((a, b) => {
-          if (a.isDir !== b.isDir) return a.isDir ? -1 : 1;
-          return a.name.localeCompare(b.name);
-        });
+      );
+      
+      const entries = entriesRaw.filter(Boolean).sort((a, b) => {
+        if (a.isDir !== b.isDir) return a.isDir ? -1 : 1;
+        return a.name.localeCompare(b.name);
+      });
 
       return { entries, path: filePath };
     } catch (err) {
@@ -240,7 +248,7 @@ function registerFileIpcHandlers() {
       
       let stat;
       try {
-        stat = fs.statSync(filePath);
+        stat = await fs.promises.stat(filePath);
       } catch {
         return { error: "Not found" };
       }
@@ -248,7 +256,7 @@ function registerFileIpcHandlers() {
       if (!stat.isFile()) return { error: "Not a file" };
       if (stat.size > 256 * 1024) return { error: "File too large for preview (>256KB)" };
       
-      const content = fs.readFileSync(filePath, "utf-8");
+      const content = await fs.promises.readFile(filePath, "utf-8");
       const language = getLanguage(filePath);
       return { content, language, size: stat.size };
     } catch (err) {
@@ -265,7 +273,7 @@ function registerFileIpcHandlers() {
       
       let stat;
       try {
-        stat = fs.statSync(filePath);
+        stat = await fs.promises.stat(filePath);
       } catch {
         return { error: "Not found" };
       }
@@ -287,7 +295,7 @@ function registerFileIpcHandlers() {
     }
   });
 
-  ipcMain.handle('watch-file', (e, reqPath) => {
+  ipcMain.handle('watch-file', async (e, reqPath) => {
     const segments = decodeFilePathFromApi(reqPath);
     const filePath = filePathFromSegments(segments);
     
@@ -298,9 +306,9 @@ function registerFileIpcHandlers() {
     }
     
     try {
-      const watcher = fs.watch(filePath, () => {
+      const watcher = fs.watch(filePath, async () => {
         try {
-          const s = fs.statSync(filePath);
+          const s = await fs.promises.stat(filePath);
           e.sender.send(`file-changed-${reqPath}`, { mtime: s.mtime.toISOString(), size: s.size });
         } catch {
           e.sender.send(`file-changed-${reqPath}`, { mtime: new Date().toISOString(), size: 0 });
@@ -400,7 +408,7 @@ ${bodyHtml}
 
 // 注册 app:// 协议拦截器 (用于加载 Next.js 静态文件)
 function registerAppProtocolHandler() {
-  protocol.handle('app', (request) => {
+  protocol.handle('app', async (request) => {
     try {
       const url = new URL(request.url);
       
@@ -412,14 +420,19 @@ function registerAppProtocolHandler() {
       }
       
       // Fallback for Next.js routing
-      if (!fs.existsSync(filePath)) {
-        if (fs.existsSync(filePath + '.html')) {
+      try {
+        await fs.promises.stat(filePath);
+      } catch {
+        try {
+          await fs.promises.stat(filePath + '.html');
           filePath += '.html';
-        } else if (url.pathname !== '/' && url.pathname !== '/index.html') {
-          // 只对非根路径进行 fallback
-          filePath = path.join(__dirname, '..', '..', 'out', 'index.html');
-        } else {
-          return new Response("Not found", { status: 404 });
+        } catch {
+          if (url.pathname !== '/' && url.pathname !== '/index.html') {
+            // 只对非根路径进行 fallback
+            filePath = path.join(__dirname, '..', '..', 'out', 'index.html');
+          } else {
+            return new Response("Not found", { status: 404 });
+          }
         }
       }
 
@@ -441,7 +454,7 @@ function registerAppProtocolHandler() {
       const ext = path.extname(filePath);
       const contentType = mimeTypes[ext] || 'application/octet-stream';
       
-      const data = fs.readFileSync(filePath);
+      const data = await fs.promises.readFile(filePath);
       return new Response(data, {
         headers: { 'Content-Type': contentType }
       });
@@ -478,7 +491,7 @@ function registerProtocolHandler() {
 
       let stat;
       try {
-        stat = fs.statSync(filePath);
+        stat = await fs.promises.stat(filePath);
       } catch {
         return new Response("Not found", { status: 404 });
       }
