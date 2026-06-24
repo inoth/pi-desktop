@@ -230,12 +230,36 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
   }, [setToolPresetState]);
 
   const connectEvents = useCallback((sid: string) => {
+    if (typeof window !== "undefined" && ('electron' in window)) {
+      if (eventSourceRef.current) {
+        // Here eventSourceRef.current is acting as a cleanup function for IPC
+        (eventSourceRef.current as any)();
+        eventSourceRef.current = null;
+      }
+      
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const cleanup = (window as any).electron.on(`agent-event-${sid}`, (event: any) => {
+        try {
+          handleAgentEventRef.current?.(event);
+        } catch {
+          // ignore
+        }
+      });
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      eventSourceRef.current = cleanup as any;
+      
+      // Tell main process to subscribe and send events
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      (window as any).electron.invoke('agent-subscribe', sid).catch(() => {});
+      return;
+    }
+
     if (eventSourceRef.current) {
-      eventSourceRef.current.close();
+      (eventSourceRef.current as unknown as { close: () => void }).close();
       eventSourceRef.current = null;
     }
     const es = new EventSource(`/api/agent/${encodeURIComponent(sid)}/events`);
-    eventSourceRef.current = es;
+    eventSourceRef.current = es as any;
     es.onmessage = (e) => {
       try {
         const event = JSON.parse(e.data) as AgentEvent;
@@ -381,10 +405,10 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
         if (selectedModel) setPendingModel(selectedModel);
         const { PRESET_NONE, PRESET_DEFAULT, PRESET_FULL } = await import("@/components/ToolPanel");
         const toolNames = toolPreset === "none" ? PRESET_NONE : toolPreset === "default" ? PRESET_DEFAULT : PRESET_FULL;
-        const res = await fetch("/api/agent/new", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
+        
+        if (typeof window !== "undefined" && ('electron' in window)) {
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          const result = await (window as any).electron.invoke('agent-new', {
             cwd: newSessionCwd,
             type: "prompt",
             message,
@@ -392,23 +416,51 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
             ...(piImages?.length ? { images: piImages } : {}),
             ...(selectedModel ? { provider: selectedModel.provider, modelId: selectedModel.modelId } : {}),
             ...(thinkingLevel !== "auto" ? { thinkingLevel } : {}),
-          }),
-        });
-        if (!res.ok) throw new Error(`HTTP ${res.status}`);
-        const result = await res.json() as { sessionId: string };
-        const realId = result.sessionId;
-        sessionIdRef.current = realId;
-        connectEvents(realId);
-        onSessionCreated?.({
-          id: realId,
-          path: "",
-          cwd: newSessionCwd,
-          name: undefined,
-          created: new Date().toISOString(),
-          modified: new Date().toISOString(),
-          messageCount: 1,
-          firstMessage: message,
-        });
+          });
+          if (!result.success) throw new Error("Failed to create agent session");
+          const realId = result.sessionId;
+          sessionIdRef.current = realId;
+          connectEvents(realId);
+          onSessionCreated?.({
+            id: realId,
+            path: "",
+            cwd: newSessionCwd,
+            name: undefined,
+            created: new Date().toISOString(),
+            modified: new Date().toISOString(),
+            messageCount: 1,
+            firstMessage: message,
+          });
+        } else {
+          const res = await fetch("/api/agent/new", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              cwd: newSessionCwd,
+              type: "prompt",
+              message,
+              toolNames,
+              ...(piImages?.length ? { images: piImages } : {}),
+              ...(selectedModel ? { provider: selectedModel.provider, modelId: selectedModel.modelId } : {}),
+              ...(thinkingLevel !== "auto" ? { thinkingLevel } : {}),
+            }),
+          });
+          if (!res.ok) throw new Error(`HTTP ${res.status}`);
+          const result = await res.json() as { sessionId: string };
+          const realId = result.sessionId;
+          sessionIdRef.current = realId;
+          connectEvents(realId);
+          onSessionCreated?.({
+            id: realId,
+            path: "",
+            cwd: newSessionCwd,
+            name: undefined,
+            created: new Date().toISOString(),
+            modified: new Date().toISOString(),
+            messageCount: 1,
+            firstMessage: message,
+          });
+        }
       } else if (session) {
         connectEvents(session.id);
         await sendAgentCommand(session.id, {
@@ -625,8 +677,17 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
       });
     }
     return () => {
-      eventSourceRef.current?.close();
-      eventSourceRef.current = null;
+      if (typeof window !== "undefined" && ('electron' in window)) {
+        if (eventSourceRef.current) {
+          (eventSourceRef.current as any)();
+          eventSourceRef.current = null;
+        }
+      } else {
+        if (eventSourceRef.current) {
+          (eventSourceRef.current as EventSource).close();
+          eventSourceRef.current = null;
+        }
+      }
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);

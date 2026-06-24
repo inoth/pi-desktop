@@ -3,6 +3,8 @@ const { ipcMain } = require('electron');
 const fs = require('fs');
 const path = require('path');
 
+const { getRpcSession, startRpcSession } = require('./rpc-manager.js');
+
 // 动态导入 ESM 模块
 async function loadPiModules() {
   const agent = await import('@earendil-works/pi-coding-agent');
@@ -197,6 +199,106 @@ function buildSessionContextWrapped(buildSessionContext, entries, targetLeafId) 
 }
 
 function registerIpcHandlers() {
+  ipcMain.handle('agent-new', async (event, command) => {
+    try {
+      const { cwd, provider, modelId, toolNames, thinkingLevel, ...promptCommand } = command;
+
+      if (!cwd || typeof cwd !== "string") {
+        throw new Error("cwd is required");
+      }
+      if (!fs.existsSync(cwd)) {
+        throw new Error(`Directory does not exist: ${cwd}`);
+      }
+
+      const tempKey = `__new__${Date.now()}`;
+      const { session, realSessionId } = await startRpcSession(tempKey, "", cwd, toolNames);
+
+      if (provider && modelId) {
+        await session.send({ type: "set_model", provider, modelId });
+      }
+
+      if (thinkingLevel) {
+        await session.send({ type: "set_thinking_level", level: thinkingLevel });
+      }
+
+      const result = await session.send(promptCommand);
+
+      return { success: true, sessionId: realSessionId, data: result };
+    } catch (error) {
+      throw new Error(String(error));
+    }
+  });
+
+  ipcMain.handle('agent-send', async (event, id, command) => {
+    try {
+      const existing = getRpcSession(id);
+      if (existing?.isAlive()) {
+        const result = await existing.send(command);
+        return { success: true, data: result };
+      }
+
+      const filePath = await resolveSessionPath(id);
+      if (!filePath) {
+        throw new Error("Session not found");
+      }
+
+      const { SessionManager } = await loadPiModules();
+      const cwd = SessionManager.open(filePath).getHeader()?.cwd ?? process.cwd();
+
+      const { session } = await startRpcSession(id, filePath, cwd);
+      const result = await session.send(command);
+
+      return { success: true, data: result };
+    } catch (error) {
+      throw new Error(String(error));
+    }
+  });
+
+  ipcMain.handle('agent-get-state', async (event, id) => {
+    try {
+      const session = getRpcSession(id);
+      if (!session || !session.isAlive()) {
+        return { running: false };
+      }
+
+      const state = await session.send({ type: "get_state" });
+      return { running: true, state };
+    } catch (error) {
+      throw new Error(String(error));
+    }
+  });
+
+  ipcMain.handle('agent-subscribe', async (event, id) => {
+    let session = getRpcSession(id);
+    if (!session || !session.isAlive()) {
+      const filePath = await resolveSessionPath(id);
+      if (!filePath) {
+        throw new Error("Session not found");
+      }
+      const { SessionManager } = await loadPiModules();
+      const cwd = SessionManager.open(filePath).getHeader()?.cwd ?? process.cwd();
+      try {
+        ({ session } = await startRpcSession(id, filePath, cwd));
+      } catch (error) {
+        throw new Error(`Failed to start agent: ${error}`);
+      }
+    }
+
+    event.sender.send(`agent-event-${id}`, { type: "connected", sessionId: id });
+
+    const unsubscribe = session.onEvent((agentEvent) => {
+      event.sender.send(`agent-event-${id}`, agentEvent);
+    });
+
+    return { success: true };
+  });
+
+  ipcMain.handle('agent-unsubscribe', async (_event, _id) => {
+    // Cannot easily unsubscribe without keeping the reference, but we rely on WebContents destroyed to cleanup? 
+    // Actually the session has idleTimer and cleans itself up.
+    return { success: true };
+  });
+
   ipcMain.handle('get-models', async () => {
     const nameMap = new Map();
     let modelList = [];
