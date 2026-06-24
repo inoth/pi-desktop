@@ -91,25 +91,13 @@ function documentPreviewKind(filePath) {
   return null;
 }
 
-let __piAllowedRootsCache = undefined;
-const ALLOWED_ROOTS_TTL_MS = 5000;
-
-async function loadPiModules() {
-  const agent = await import('@earendil-works/pi-coding-agent');
-  return agent;
-}
+// 维护当前活跃的、被授权的工作区列表
+const activeAllowedWorkspaces = new Set();
 
 async function getAllowedRoots() {
-  const now = Date.now();
-  if (__piAllowedRootsCache && __piAllowedRootsCache.expiresAt > now) return __piAllowedRootsCache.roots;
-
-  const { SessionManager } = await loadPiModules();
-  const sessions = await SessionManager.listAll();
-  const roots = new Set();
-  for (const s of sessions) {
-    if (s.cwd) roots.add(s.cwd);
-  }
+  const roots = new Set(activeAllowedWorkspaces);
   
+  // 默认允许访问系统的临时沙盒目录 (Pi 自动生成的)
   const home = os.homedir();
   try {
     for (const name of fs.readdirSync(home)) {
@@ -121,7 +109,6 @@ async function getAllowedRoots() {
     // ignore
   }
 
-  __piAllowedRootsCache = { roots, expiresAt: now + ALLOWED_ROOTS_TTL_MS };
   return roots;
 }
 
@@ -145,6 +132,20 @@ function isPathAllowed(target, allowedRoots) {
 const fileWatchers = new Map();
 
 function registerFileIpcHandlers() {
+  // 注册/授权一个新的工作区目录
+  ipcMain.handle('register-workspace', async (e, cwd) => {
+    try {
+      if (typeof cwd === 'string' && cwd.trim()) {
+        const absolutePath = path.resolve(cwd.trim());
+        activeAllowedWorkspaces.add(absolutePath);
+        return { success: true };
+      }
+      return { error: "Invalid path" };
+    } catch (err) {
+      return { error: String(err) };
+    }
+  });
+
   ipcMain.handle('cwd-validate', async (e, cwd) => {
     try {
       const normalizedCwd = typeof cwd === 'string' ? cwd.trim() : '';
@@ -404,7 +405,7 @@ function registerAppProtocolHandler() {
       const url = new URL(request.url);
       
       // out/ directory is the root of the app
-      let filePath = path.join(__dirname, '..', 'out', url.pathname);
+      let filePath = path.join(__dirname, '..', '..', 'out', url.pathname);
       
       if (filePath.endsWith('/')) {
         filePath = path.join(filePath, 'index.html');
@@ -414,8 +415,11 @@ function registerAppProtocolHandler() {
       if (!fs.existsSync(filePath)) {
         if (fs.existsSync(filePath + '.html')) {
           filePath += '.html';
+        } else if (url.pathname !== '/' && url.pathname !== '/index.html') {
+          // 只对非根路径进行 fallback
+          filePath = path.join(__dirname, '..', '..', 'out', 'index.html');
         } else {
-          filePath = path.join(__dirname, '..', 'out', 'index.html');
+          return new Response("Not found", { status: 404 });
         }
       }
 

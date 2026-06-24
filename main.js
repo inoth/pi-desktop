@@ -48,7 +48,7 @@ app.whenReady().then(() => {
     } else {
       // 生产模式：加载 Next.js 静态导出的 index.html
       // 改为使用 app:// 协议加载，这样能正确解析 /_next/... 等绝对路径资源
-      win.loadURL('app://./index.html');
+      win.loadURL('app://-/');
     }
   }
 

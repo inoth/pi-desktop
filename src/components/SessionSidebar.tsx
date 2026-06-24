@@ -267,6 +267,8 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
         restoredRef.current = true;
         const target = allSessions.find((s) => s.id === initialSessionId);
         if (target) {
+          // 注册恢复的工作区
+          window.electron.invoke('register-workspace', target.cwd).catch(() => {});
           setSelectedCwd(target.cwd);
           onSelectSession(target, true);
           return;
@@ -275,7 +277,11 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
         onInitialRestoreDone?.();
       }
       const cwds = getRecentCwds(allSessions);
-      if (cwds.length > 0) setSelectedCwd(cwds[0]);
+      if (cwds.length > 0) {
+        // 注册最近使用的工作区
+        window.electron.invoke('register-workspace', cwds[0]).catch(() => {});
+        setSelectedCwd(cwds[0]);
+      }
     }
   }, [allSessions, selectedCwd, initialSessionId, onSelectSession, onInitialRestoreDone]);
 
@@ -291,6 +297,14 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
         setCustomPathError(data.error);
         return;
       }
+      
+      // 注册工作区到主进程
+      const regData = await window.electron.invoke('register-workspace', data.cwd ?? path);
+      if (regData.error) {
+        setCustomPathError(regData.error);
+        return;
+      }
+
       setSelectedCwd(data.cwd ?? path);
       setCustomPathOpen(false);
       setCustomPathValue("");
@@ -306,6 +320,9 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
     try {
       const data = await window.electron.invoke('default-cwd');
       if (data.cwd) {
+        // 默认目录也注册一下工作区
+        await window.electron.invoke('register-workspace', data.cwd);
+        
         setSelectedCwd(data.cwd);
         setCustomPathOpen(false);
         setCustomPathValue("");
@@ -496,6 +513,8 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
                 <button
                   key={cwd}
                   onClick={() => {
+                    // 点击历史记录时也需要重新注册一下工作区
+                    window.electron.invoke('register-workspace', cwd).catch(() => {});
                     setSelectedCwd(cwd);
                     setCustomPathOpen(false);
                     setCustomPathValue("");

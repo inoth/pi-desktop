@@ -123,7 +123,13 @@ export function AppShell() {
     setBranchActiveLeafId(null);
     setSystemPrompt(null);
     setActiveTopPanel(null);
-    router.replace("/", { scroll: false });
+    if (typeof window !== "undefined" && !window.location.protocol.startsWith("app")) {
+      router.replace("/", { scroll: false });
+    } else {
+      if (typeof window !== "undefined") {
+        window.history.pushState(null, "", "/");
+      }
+    }
   }, [router]);
 
   const handleSelectSession = useCallback((session: SessionInfo, isRestore = false) => {
@@ -140,7 +146,13 @@ export function AppShell() {
     // Skip router.replace when restoring from URL — the param is already correct
     // and calling replace in production Next.js triggers a Suspense remount loop
     if (!isRestore) {
-      router.replace(`?session=${encodeURIComponent(session.id)}`, { scroll: false });
+      if (typeof window !== "undefined" && !window.location.protocol.startsWith("app")) {
+        router.replace(`?session=${encodeURIComponent(session.id)}`, { scroll: false });
+      } else {
+        if (typeof window !== "undefined") {
+          window.history.pushState(null, "", `?session=${encodeURIComponent(session.id)}`);
+        }
+      }
     }
   }, [router]);
 
@@ -152,7 +164,13 @@ export function AppShell() {
     setBranchActiveLeafId(null);
     setSystemPrompt(null);
     setActiveTopPanel(null);
-    router.replace("/", { scroll: false });
+    if (typeof window !== "undefined" && !window.location.protocol.startsWith("app")) {
+      router.replace("/", { scroll: false });
+    } else {
+      if (typeof window !== "undefined") {
+        window.history.pushState(null, "", "/");
+      }
+    }
   }, [router]);
 
   // Called by ChatWindow when a new session gets its real id from pi
@@ -160,7 +178,13 @@ export function AppShell() {
     setNewSessionCwd(null);
     setSelectedSession(session);
     setRefreshKey((k) => k + 1);
-    router.replace(`?session=${encodeURIComponent(session.id)}`, { scroll: false });
+    if (typeof window !== "undefined" && !window.location.protocol.startsWith("app")) {
+      router.replace(`?session=${encodeURIComponent(session.id)}`, { scroll: false });
+    } else {
+      if (typeof window !== "undefined") {
+        window.history.pushState(null, "", `?session=${encodeURIComponent(session.id)}`);
+      }
+    }
   }, [router]);
 
   const handleAgentEnd = useCallback(() => {
@@ -176,7 +200,13 @@ export function AppShell() {
       ...(prev ?? { path: "", cwd: "", created: "", modified: "", messageCount: 0, firstMessage: "" }),
       id: newSessionId,
     }));
-    router.replace(`?session=${encodeURIComponent(newSessionId)}`, { scroll: false });
+    if (typeof window !== "undefined" && !window.location.protocol.startsWith("app")) {
+      router.replace(`?session=${encodeURIComponent(newSessionId)}`, { scroll: false });
+    } else {
+      if (typeof window !== "undefined") {
+        window.history.pushState(null, "", `?session=${encodeURIComponent(newSessionId)}`);
+      }
+    }
   }, [router]);
 
   const handleInitialRestoreDone = useCallback(() => {
@@ -194,7 +224,13 @@ export function AppShell() {
       setBranchActiveLeafId(null);
       setSystemPrompt(null);
       setActiveTopPanel(null);
-      router.replace("/", { scroll: false });
+      if (typeof window !== "undefined" && !window.location.protocol.startsWith("app")) {
+        router.replace("/", { scroll: false });
+      } else {
+        if (typeof window !== "undefined") {
+          window.history.pushState(null, "", "/");
+        }
+      }
     }
   }, [selectedSession, router]);
 
