@@ -5,11 +5,15 @@ const path = require('path');
 
 const { getRpcSession, startRpcSession } = require('./rpc-manager.js');
 
-// 动态导入 ESM 模块
+// 缓存动态导入的 ESM 模块
+let cachedPiModules = null;
+
 async function loadPiModules() {
+  if (cachedPiModules) return cachedPiModules;
   const agent = await import('@earendil-works/pi-coding-agent');
   const ai = await import('@earendil-works/pi-ai');
-  return { ...agent, ...ai };
+  cachedPiModules = { ...agent, ...ai };
+  return cachedPiModules;
 }
 
 // 缓存会话路径

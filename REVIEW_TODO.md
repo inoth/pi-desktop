@@ -16,7 +16,7 @@
   - **问题**: 模型流式输出时高频触发 `onSessionStatsChange` 和 `onContextUsageChange`，导致庞大的顶层组件 `AppShell` 持续重渲染，消耗 CPU 并可能引起 UI 掉帧。
   - **行动**: 将顶部 Token/Cost 统计栏抽离为独立组件，通过 Context、Zustand 或 EventEmitter 将更新直接发送到该子组件，从而切断对 `AppShell` 的渲染链。
 
-- [ ] **优化主进程动态模块导入性能**
+- [x] **优化主进程动态模块导入性能**
   - **文件**: `src/main/ipc-handlers.js`
   - **问题**: `loadPiModules()` 在多数 IPC 处理器中频繁调用，频繁的 `import()` 会带来微任务调度开销。
   - **行动**: 实现单例模式，将动态导入的结果缓存到全局变量中。
