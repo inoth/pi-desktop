@@ -832,10 +832,18 @@ function registerIpcHandlers() {
       const filePath = await resolveSessionPath(id);
       if (!filePath) throw new Error("Session not found");
 
-      const cliUrl = require.resolve('@earendil-works/pi-coding-agent');
-      const cliPath = path.join(path.dirname(cliUrl), "cli.js");
+      let cliPath = null;
+      let currentDir = __dirname;
+      while (currentDir !== path.dirname(currentDir)) {
+        const possiblePath = path.join(currentDir, 'node_modules', '@earendil-works', 'pi-coding-agent', 'dist', 'cli.js');
+        if (fs.existsSync(possiblePath)) {
+          cliPath = possiblePath;
+          break;
+        }
+        currentDir = path.dirname(currentDir);
+      }
       
-      if (!fs.existsSync(cliPath)) throw new Error("pi CLI not found");
+      if (!cliPath) throw new Error("pi CLI not found");
 
       const tempDir = path.join(os.tmpdir(), "pi-web-export");
       fs.mkdirSync(tempDir, { recursive: true });
