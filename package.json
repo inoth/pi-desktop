@@ -16,8 +16,11 @@
     "next.config.ts",
     "package.json"
   ],
+  "main": "main.js",
   "scripts": {
-    "dev": "next dev -p 30141",
+    "dev:next": "next dev -p 30141",
+    "dev:electron": "wait-on http://localhost:30141 && electron . --dev",
+    "dev": "concurrently -k \"npm run dev:next\" \"npm run dev:electron\"",
     "build": "next build --webpack",
     "start": "next start -p 30141",
     "lint": "eslint .",
@@ -47,10 +50,14 @@
     "@types/node": "^25",
     "@types/react": "^19",
     "@types/react-dom": "^19",
+    "concurrently": "^10.0.3",
+    "electron": "^42.5.0",
+    "electron-builder": "^26.15.3",
     "eslint": "^9",
     "eslint-config-next": "16.2.1",
     "postcss": "^8",
     "tailwindcss": "^4.2.2",
-    "typescript": "^5"
+    "typescript": "^5",
+    "wait-on": "^9.0.10"
   }
 }
