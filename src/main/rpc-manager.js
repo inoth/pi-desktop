@@ -1,4 +1,4 @@
-/* eslint-disable @typescript-eslint/no-require-imports */
+ 
 // Dynamic import used inside async functions because the module is ESM-only
 // const { createAgentSession, SessionManager, getAgentDir } = require("@earendil-works/pi-coding-agent");
 

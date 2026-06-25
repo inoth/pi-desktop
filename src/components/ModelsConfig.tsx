@@ -542,20 +542,20 @@ function ModelDetail({
     setTestState({ phase: "testing" });
     try {
       const res = await window.electron.invoke('test-model-config', { providerName, provider, model });
-      if (!res.ok) {
+      if (!(res as { ok?: boolean }).ok) {
         setTestState({
           phase: "error",
-          message: res.error ?? `HTTP ${res.status}`,
-          latencyMs: res.latencyMs,
-          status: res.status,
+          message: (res as { error?: string; status?: number }).error ?? `HTTP ${(res as { error?: string; status?: number }).status}`,
+          latencyMs: (res as { latencyMs?: number }).latencyMs,
+          status: (res as { status?: number }).status,
         });
         return;
       }
       setTestState({
         phase: "success",
-        latencyMs: res.latencyMs,
-        status: res.status,
-        responseText: res.responseText,
+        latencyMs: (res as { latencyMs?: number }).latencyMs,
+        status: (res as { status?: number }).status,
+        responseText: (res as { responseText?: string }).responseText,
       });
     } catch (e) {
       setTestState({ phase: "error", message: e instanceof Error ? e.message : String(e) });
@@ -732,39 +732,40 @@ function OAuthDetail({ provider, onRefresh }: { provider: OAuthProvider; onRefre
     setLoginState({ phase: "connecting" });
     setInputValue("");
 
-    unlistenRef.current = window.electron.on(`auth-progress-${provider.id}`, (data: any) => {
-      if (data.type === "auth") {
-        setLoginState({ phase: "auth", url: data.url!, instructions: data.instructions ?? null, token: data.token! });
-        window.open(data.url!, "_blank", "noopener,noreferrer");
-      } else if (data.type === "device_code") {
+    unlistenRef.current = window.electron.on(`auth-progress-${provider.id}`, (data: unknown) => {
+      const authData = data as { phase: OAuthLoginState["phase"] } & Partial<OAuthLoginState>;
+      if ((data as { type?: string; url?: string; instructions?: string; token?: string; userCode?: string; verificationUri?: string; intervalSeconds?: number; expiresInSeconds?: number; message?: string; placeholder?: string; options?: { id: string; label: string }[] }).type === "auth") {
+        setLoginState({ phase: "auth", url: (authData as { type?: string; url?: string; instructions?: string; token?: string; userCode?: string; verificationUri?: string; intervalSeconds?: number; expiresInSeconds?: number; message?: string; placeholder?: string; options?: { id: string; label: string }[] }).url!, instructions: (authData as { type?: string; url?: string; instructions?: string; token?: string; userCode?: string; verificationUri?: string; intervalSeconds?: number; expiresInSeconds?: number; message?: string; placeholder?: string; options?: { id: string; label: string }[] }).instructions ?? null, token: (authData as { type?: string; url?: string; instructions?: string; token?: string; userCode?: string; verificationUri?: string; intervalSeconds?: number; expiresInSeconds?: number; message?: string; placeholder?: string; options?: { id: string; label: string }[] }).token! });
+        window.open((authData as { type?: string; url?: string; instructions?: string; token?: string; userCode?: string; verificationUri?: string; intervalSeconds?: number; expiresInSeconds?: number; message?: string; placeholder?: string; options?: { id: string; label: string }[] }).url!, "_blank", "noopener,noreferrer");
+      } else if ((data as { type?: string; url?: string; instructions?: string; token?: string; userCode?: string; verificationUri?: string; intervalSeconds?: number; expiresInSeconds?: number; message?: string; placeholder?: string; options?: { id: string; label: string }[] }).type === "device_code") {
         setLoginState({
           phase: "device_code",
-          userCode: data.userCode!,
-          verificationUri: data.verificationUri!,
-          intervalSeconds: data.intervalSeconds ?? null,
-          expiresInSeconds: data.expiresInSeconds ?? null,
+          userCode: (data as { type?: string; url?: string; instructions?: string; token?: string; userCode?: string; verificationUri?: string; intervalSeconds?: number; expiresInSeconds?: number; message?: string; placeholder?: string; options?: { id: string; label: string }[] }).userCode!,
+          verificationUri: (data as { type?: string; url?: string; instructions?: string; token?: string; userCode?: string; verificationUri?: string; intervalSeconds?: number; expiresInSeconds?: number; message?: string; placeholder?: string; options?: { id: string; label: string }[] }).verificationUri!,
+          intervalSeconds: (data as { type?: string; url?: string; instructions?: string; token?: string; userCode?: string; verificationUri?: string; intervalSeconds?: number; expiresInSeconds?: number; message?: string; placeholder?: string; options?: { id: string; label: string }[] }).intervalSeconds ?? null,
+          expiresInSeconds: (data as { type?: string; url?: string; instructions?: string; token?: string; userCode?: string; verificationUri?: string; intervalSeconds?: number; expiresInSeconds?: number; message?: string; placeholder?: string; options?: { id: string; label: string }[] }).expiresInSeconds ?? null,
         });
-        window.open(data.verificationUri!, "_blank", "noopener,noreferrer");
-      } else if (data.type === "prompt_request") {
-        setLoginState({ phase: "prompt", message: data.message!, placeholder: data.placeholder ?? null, token: data.token! });
-      } else if (data.type === "select_request") {
-        setLoginState({ phase: "select", message: data.message!, options: data.options ?? [], token: data.token! });
-      } else if (data.type === "progress") {
-        setLoginState({ phase: "progress", message: data.message! });
-      } else if (data.type === "success") {
+        window.open((authData as { type?: string; url?: string; instructions?: string; token?: string; userCode?: string; verificationUri?: string; intervalSeconds?: number; expiresInSeconds?: number; message?: string; placeholder?: string; options?: { id: string; label: string }[] }).verificationUri!, "_blank", "noopener,noreferrer");
+      } else if ((data as { type?: string; url?: string; instructions?: string; token?: string; userCode?: string; verificationUri?: string; intervalSeconds?: number; expiresInSeconds?: number; message?: string; placeholder?: string; options?: { id: string; label: string }[] }).type === "prompt_request") {
+        setLoginState({ phase: "prompt", message: (authData as { type?: string; url?: string; instructions?: string; token?: string; userCode?: string; verificationUri?: string; intervalSeconds?: number; expiresInSeconds?: number; message?: string; placeholder?: string; options?: { id: string; label: string }[] }).message!, placeholder: (authData as { type?: string; url?: string; instructions?: string; token?: string; userCode?: string; verificationUri?: string; intervalSeconds?: number; expiresInSeconds?: number; message?: string; placeholder?: string; options?: { id: string; label: string }[] }).placeholder ?? null, token: (authData as { type?: string; url?: string; instructions?: string; token?: string; userCode?: string; verificationUri?: string; intervalSeconds?: number; expiresInSeconds?: number; message?: string; placeholder?: string; options?: { id: string; label: string }[] }).token! });
+      } else if ((data as { type?: string; url?: string; instructions?: string; token?: string; userCode?: string; verificationUri?: string; intervalSeconds?: number; expiresInSeconds?: number; message?: string; placeholder?: string; options?: { id: string; label: string }[] }).type === "select_request") {
+        setLoginState({ phase: "select", message: (data as { type?: string; url?: string; instructions?: string; token?: string; userCode?: string; verificationUri?: string; intervalSeconds?: number; expiresInSeconds?: number; message?: string; placeholder?: string; options?: { id: string; label: string }[] }).message!, options: (data as { type?: string; url?: string; instructions?: string; token?: string; userCode?: string; verificationUri?: string; intervalSeconds?: number; expiresInSeconds?: number; message?: string; placeholder?: string; options?: { id: string; label: string }[] }).options ?? [], token: (data as { type?: string; url?: string; instructions?: string; token?: string; userCode?: string; verificationUri?: string; intervalSeconds?: number; expiresInSeconds?: number; message?: string; placeholder?: string; options?: { id: string; label: string }[] }).token! });
+      } else if ((data as { type?: string; url?: string; instructions?: string; token?: string; userCode?: string; verificationUri?: string; intervalSeconds?: number; expiresInSeconds?: number; message?: string; placeholder?: string; options?: { id: string; label: string }[] }).type === "progress") {
+        setLoginState({ phase: "progress", message: (authData as { type?: string; url?: string; instructions?: string; token?: string; userCode?: string; verificationUri?: string; intervalSeconds?: number; expiresInSeconds?: number; message?: string; placeholder?: string; options?: { id: string; label: string }[] }).message! });
+      } else if ((data as { type?: string; url?: string; instructions?: string; token?: string; userCode?: string; verificationUri?: string; intervalSeconds?: number; expiresInSeconds?: number; message?: string; placeholder?: string; options?: { id: string; label: string }[] }).type === "success") {
         if (unlistenRef.current) {
           unlistenRef.current();
           unlistenRef.current = null;
         }
         setLoginState({ phase: "success" });
         onRefresh();
-      } else if (data.type === "error") {
+      } else if ((data as { type?: string; url?: string; instructions?: string; token?: string; userCode?: string; verificationUri?: string; intervalSeconds?: number; expiresInSeconds?: number; message?: string; placeholder?: string; options?: { id: string; label: string }[] }).type === "error") {
         if (unlistenRef.current) {
           unlistenRef.current();
           unlistenRef.current = null;
         }
-        setLoginState({ phase: "error", message: data.message! });
-      } else if (data.type === "cancelled") {
+        setLoginState({ phase: "error", message: (authData as { type?: string; url?: string; instructions?: string; token?: string; userCode?: string; verificationUri?: string; intervalSeconds?: number; expiresInSeconds?: number; message?: string; placeholder?: string; options?: { id: string; label: string }[] }).message! });
+      } else if ((data as { type?: string; url?: string; instructions?: string; token?: string; userCode?: string; verificationUri?: string; intervalSeconds?: number; expiresInSeconds?: number; message?: string; placeholder?: string; options?: { id: string; label: string }[] }).type === "cancelled") {
         if (unlistenRef.current) {
           unlistenRef.current();
           unlistenRef.current = null;
@@ -773,7 +774,7 @@ function OAuthDetail({ provider, onRefresh }: { provider: OAuthProvider; onRefre
       }
     });
 
-    window.electron.invoke("auth-login", provider.id).catch((e: any) => {
+    window.electron.invoke("auth-login", provider.id).catch((e: Error | { message?: string }) => {
       setLoginState((prev) => prev.phase === "success" ? prev : { phase: "error", message: e.message || "Connection lost" });
       if (unlistenRef.current) {
         unlistenRef.current();
@@ -793,7 +794,7 @@ function OAuthDetail({ provider, onRefresh }: { provider: OAuthProvider; onRefre
     setLoginState({ phase: "progress", message: "Verifying…" });
     try {
       const res = await window.electron.invoke('submit-auth-code', { provider: provider.id, token, code: code.trim() });
-      if (!res.ok) {
+      if (!(res as { ok?: boolean }).ok) {
         setLoginState({ phase: "error", message: `Server error` });
         return;
       }
@@ -808,7 +809,7 @@ function OAuthDetail({ provider, onRefresh }: { provider: OAuthProvider; onRefre
     setLoginState({ phase: "progress", message: "Continuing…" });
     try {
       const res = await window.electron.invoke('submit-auth-code', { provider: provider.id, token, code: value });
-      if (!res.ok) {
+      if (!(res as { ok?: boolean }).ok) {
         setLoginState({ phase: "error", message: `Server error` });
       }
     } catch (e) {
@@ -983,7 +984,7 @@ function ApiKeyDetail({ provider, onRefresh }: { provider: ApiKeyProvider; onRef
     setSavedOk(false);
     try {
       const res = await window.electron.invoke('save-api-key', provider.id, apiKey.trim());
-      if (res.success) {
+      if ((res as { success?: boolean }).success) {
         setApiKey("");
         setSavedOk(true);
         setTimeout(() => setSavedOk(false), 2000);
@@ -1003,7 +1004,7 @@ function ApiKeyDetail({ provider, onRefresh }: { provider: ApiKeyProvider; onRef
     setError(null);
     try {
       const res = await window.electron.invoke('delete-api-key', provider.id);
-      if (res.success) {
+      if ((res as { success?: boolean }).success) {
         onRefresh();
       } else {
         setError(`Failed to remove API key`);
@@ -1278,20 +1279,21 @@ export function ModelsConfig({ onClose }: { onClose: () => void }) {
 
   const loadOAuthProviders = useCallback(() => {
     window.electron.invoke('get-auth-providers')
-      .then((d: any) => setOauthProviders(d.providers))
+      .then((d: unknown) => setOauthProviders((d as { providers: OAuthProvider[] }).providers))
       .catch(() => {});
   }, []);
 
   const loadApiKeyProviders = useCallback(() => {
     window.electron.invoke('get-all-providers')
-      .then((d: any) => setApiKeyProviders(d.providers))
+      .then((d: unknown) => setApiKeyProviders((d as { providers: ApiKeyProvider[] }).providers))
       .catch(() => {});
   }, []);
 
   useEffect(() => {
     window.electron.invoke('get-models-config')
-      .then((d: any) => {
-        const normalized = d.providers ? d : { ...d, providers: {} };
+      .then((d: unknown) => {
+        const data = d as ModelsJson;
+        const normalized = data.providers ? data : { ...data, providers: {} };
         setConfig(normalized);
         const keys = Object.keys(normalized.providers ?? {});
         if (keys.length > 0) setSelection({ type: "provider", name: keys[0] });
@@ -1334,12 +1336,9 @@ export function ModelsConfig({ onClose }: { onClose: () => void }) {
     setConfig((prev) => {
       const providers = { ...(prev.providers ?? {}) };
       delete providers[name];
-      return { ...prev, providers };
-    });
-    setConfig((prev) => {
-      const remaining = Object.keys(prev.providers ?? {});
+      const remaining = Object.keys(providers);
       setSelection(remaining.length > 0 ? { type: "provider", name: remaining[0] } : null);
-      return prev;
+      return { ...prev, providers };
     });
   }, []);
 
@@ -1347,12 +1346,9 @@ export function ModelsConfig({ onClose }: { onClose: () => void }) {
     setConfig((prev) => {
       const provider = prev.providers?.[providerName] ?? {};
       const models = [...(provider.models ?? []), { id: "" }];
-      return { ...prev, providers: { ...(prev.providers ?? {}), [providerName]: { ...provider, models } } };
-    });
-    setConfig((prev) => {
-      const idx = (prev.providers?.[providerName]?.models?.length ?? 1) - 1;
+      const idx = models.length - 1;
       setSelection({ type: "model", providerName, index: idx });
-      return prev;
+      return { ...prev, providers: { ...(prev.providers ?? {}), [providerName]: { ...provider, models } } };
     });
   }, []);
 
@@ -1381,11 +1377,11 @@ export function ModelsConfig({ onClose }: { onClose: () => void }) {
     setSavedOk(false);
     try {
       const res = await window.electron.invoke('save-models-config', config);
-      if (res.success) {
+      if ((res as { success?: boolean }).success) {
         setSavedOk(true);
         setTimeout(() => setSavedOk(false), 2000);
       } else {
-        setSaveError(res.error ?? `Save failed`);
+        setSaveError((res as { error?: string }).error ?? `Save failed`);
       }
     } catch (e) {
       setSaveError(e instanceof Error ? e.message : String(e));

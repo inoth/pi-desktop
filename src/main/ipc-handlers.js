@@ -18,6 +18,7 @@ async function loadPiModules() {
 
 // 缓存会话路径
 const pathCache = new Map();
+global.pathCache = pathCache;
 
 async function resolveSessionPath(id) {
   if (pathCache.has(id)) return pathCache.get(id);
@@ -490,13 +491,23 @@ function registerIpcHandlers() {
         for (const file of files) {
           const childPath = path.join(dir, file);
           try {
-            const content = fs.readFileSync(childPath, "utf8");
-            const lines = content.split("\n");
-            const header = JSON.parse(lines[0]);
+            // Read only the first few bytes to get the header instead of the whole file
+            const fd = fs.openSync(childPath, "r");
+            const buffer = Buffer.alloc(4096);
+            const bytesRead = fs.readSync(fd, buffer, 0, 4096, 0);
+            fs.closeSync(fd);
+            
+            const firstLineBytes = buffer.subarray(0, bytesRead).toString("utf8").split("\n")[0];
+            const header = JSON.parse(firstLineBytes);
+            
             if (header.type === "session" && header.parentSession === filePath) {
               header.parentSession = parentSessionPath;
-              lines[0] = JSON.stringify(header);
-              fs.writeFileSync(childPath, lines.join("\n"));
+              const newHeaderLine = JSON.stringify(header);
+              
+              // Rewrite the file with the new header
+              const content = fs.readFileSync(childPath, "utf8");
+              const contentWithoutOldHeader = content.substring(content.indexOf('\n') + 1);
+              fs.writeFileSync(childPath, newHeaderLine + "\n" + contentWithoutOldHeader);
             }
           } catch { /* skip malformed */ }
         }
@@ -892,6 +903,9 @@ function registerIpcHandlers() {
   ipcMain.handle('skills-patch', async (event, { filePath, disableModelInvocation }) => {
     try {
       if (!filePath) throw new Error("filePath required");
+      const { isPathAllowed, getAllowedRoots } = require('./ipc-handlers-files.js');
+      const allowedRoots = await getAllowedRoots();
+      if (!isPathAllowed(filePath, allowedRoots)) throw new Error("Access denied");
       if (!fs.existsSync(filePath)) throw new Error("file not found");
 
       const content = fs.readFileSync(filePath, "utf8");
@@ -943,10 +957,15 @@ function registerIpcHandlers() {
         ? { command: process.execPath, commandArgs: [npxCli, ...args] }
         : { command: "npx", commandArgs: args };
 
+      const env = { ...process.env, FORCE_COLOR: "0" };
+      if (npxCli) {
+        env.ELECTRON_RUN_AS_NODE = "1";
+      }
+
       const { stdout, stderr } = await execFileAsync(command, commandArgs, {
         timeout: 60000,
         cwd: !isGlobal && cwd ? cwd : undefined,
-        env: { ...process.env, FORCE_COLOR: "0" },
+        env,
       });
 
       const ANSI_RE = /\x1B\[[0-9;]*m/g;

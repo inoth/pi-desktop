@@ -4,12 +4,6 @@ import { useState, useCallback, useEffect, useRef } from "react";
 import { getFileIcon, FolderIcon } from "./FileIcons";
 import { encodeFilePathForApi, getRelativeFilePath, joinFilePath } from "@/lib/file-paths";
 
-interface FileEntry {
-  name: string;
-  isDir: boolean;
-  size: number;
-  modified: string;
-}
 
 interface FileNode {
   name: string;
@@ -30,8 +24,8 @@ interface Props {
 async function fetchEntries(dirPath: string): Promise<FileNode[]> {
   const encoded = encodeFilePathForApi(dirPath);
   const res = await window.electron.invoke('list-dir', encoded);
-  if (res.error) return [];
-  return (res.entries ?? []).map((e: any) => ({
+  if ((res as { error?: string }).error) return [];
+  return ((res as { entries: { name: string; isDir: boolean; size: number }[] }).entries ?? []).map((e: { name: string; isDir: boolean; size: number }) => ({
     name: e.name,
     fullPath: joinFilePath(dirPath, e.name),
     isDir: e.isDir,
@@ -223,6 +217,7 @@ export function FileExplorer({ cwd, onOpenFile, refreshKey, onAtMention }: Props
   }, []);
 
   useEffect(() => {
+    let ignore = false;
     const cwdChanged = prevCwdRef.current !== cwd;
     prevCwdRef.current = cwd;
 
@@ -232,9 +227,17 @@ export function FileExplorer({ cwd, onOpenFile, refreshKey, onAtMention }: Props
     setLoading(cwdChanged);
     setError(null);
     fetchEntries(cwd)
-      .then((entries) => setRoots(entries))
-      .catch((e) => setError(String(e)))
-      .finally(() => setLoading(false));
+      .then((entries) => {
+        if (!ignore) setRoots(entries);
+      })
+      .catch((e) => {
+        if (!ignore) setError(String(e));
+      })
+      .finally(() => {
+        if (!ignore) setLoading(false);
+      });
+      
+    return () => { ignore = true; };
   }, [cwd, refreshKey]);
 
   if (loading) {

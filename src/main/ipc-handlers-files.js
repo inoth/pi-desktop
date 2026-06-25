@@ -1,3 +1,5 @@
+/* eslint-disable @typescript-eslint/no-require-imports */
+
 const { ipcMain, protocol } = require('electron');
 const fs = require('fs');
 const path = require('path');
@@ -19,9 +21,7 @@ function filePathFromSegments(segments) {
   return "/" + joined.replace(/^\/+/, "");
 }
 
-function encodeFilePathForApi(filePath) {
-  return filePath.split("/").map(encodeURIComponent).join("/");
-}
+
 function decodeFilePathFromApi(encoded) {
   return encoded.split("/").map(decodeURIComponent);
 }
@@ -298,6 +298,9 @@ function registerFileIpcHandlers() {
     const segments = decodeFilePathFromApi(reqPath);
     const filePath = filePathFromSegments(segments);
     
+    const allowedRoots = await getAllowedRoots();
+    if (!isPathAllowed(filePath, allowedRoots)) return { error: "Access denied" };
+    
     // Check if already watching this file for this webContents
     const watcherKey = `${e.sender.id}:${filePath}`;
     if (fileWatchers.has(watcherKey)) {
@@ -542,8 +545,15 @@ function registerProtocolHandler() {
           start(controller) {
             nodeStream.on('data', chunk => {
               if (closed) return;
-              try { controller.enqueue(new Uint8Array(chunk)); } 
-              catch { closed = true; nodeStream.destroy(); }
+              try { 
+                controller.enqueue(new Uint8Array(chunk));
+                if (controller.desiredSize !== null && controller.desiredSize <= 0) {
+                  nodeStream.pause();
+                }
+              } catch { 
+                closed = true; 
+                nodeStream.destroy(); 
+              }
             });
             nodeStream.on('end', () => {
               if (closed) return;
@@ -555,6 +565,11 @@ function registerProtocolHandler() {
               closed = true;
               try { controller.error(err); } catch { /* ignore */ }
             });
+          },
+          pull() {
+            if (!closed) {
+              nodeStream.resume();
+            }
           },
           cancel() {
             closed = true;
@@ -628,5 +643,7 @@ function registerProtocolHandler() {
 module.exports = {
   registerFileIpcHandlers,
   registerProtocolHandler,
-  registerAppProtocolHandler
+  registerAppProtocolHandler,
+  isPathAllowed,
+  getAllowedRoots
 };

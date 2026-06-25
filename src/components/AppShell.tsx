@@ -204,24 +204,27 @@ export function AppShell() {
 
   const handleSessionDeleted = useCallback((sessionId: string) => {
     setRefreshKey((k) => k + 1);
-    if (selectedSession?.id === sessionId) {
-      const cwd = selectedSession.cwd;
-      setSelectedSession(null);
-      setNewSessionCwd(cwd ?? null);
-      setSessionKey((k) => k + 1);
-      setBranchTree([]);
-      setBranchActiveLeafId(null);
-      setSystemPrompt(null);
-      setActiveTopPanel(null);
-      if (typeof window !== "undefined" && !window.location.protocol.startsWith("app")) {
-        router.replace("/", { scroll: false });
-      } else {
-        if (typeof window !== "undefined") {
-          window.history.pushState(null, "", "/");
+    setSelectedSession((prevSelected) => {
+      if (prevSelected?.id === sessionId) {
+        const cwd = prevSelected.cwd;
+        setNewSessionCwd(cwd ?? null);
+        setSessionKey((k) => k + 1);
+        setBranchTree([]);
+        setBranchActiveLeafId(null);
+        setSystemPrompt(null);
+        setActiveTopPanel(null);
+        if (typeof window !== "undefined" && !window.location.protocol.startsWith("app")) {
+          router.replace("/", { scroll: false });
+        } else {
+          if (typeof window !== "undefined") {
+            window.history.pushState(null, "", "/");
+          }
         }
+        return null;
       }
-    }
-  }, [selectedSession, router]);
+      return prevSelected;
+    });
+  }, [router]);
 
   const handleOpenFile = useCallback((filePath: string, fileName: string) => {
     const tabId = `file:${filePath}`;

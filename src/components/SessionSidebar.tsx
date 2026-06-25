@@ -220,7 +220,7 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
     try {
       if (showLoading) setLoading(true);
       const data = await window.electron.invoke('get-sessions');
-      setAllSessions(data.sessions);
+      setAllSessions((data as { sessions: SessionInfo[] }).sessions);
       setError(null);
       if (!showLoading) {
         setSessionRefreshDone(true);
@@ -246,8 +246,8 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
   }, [explorerRefreshKey]);
 
   useEffect(() => {
-    window.electron.invoke('home-dir').then((d: { home?: string }) => {
-      if (d.home) setHomeDir(d.home);
+    window.electron.invoke('home-dir').then((d: unknown) => {
+      if ((d as { home?: string }).home) setHomeDir((d as { home?: string }).home || "");
     }).catch(() => {});
   }, []);
 
@@ -259,7 +259,14 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
 
   // Auto-select cwd and restore session from URL on first load
   useEffect(() => {
-    if (allSessions.length === 0) return;
+    if (loading) return;
+    if (allSessions.length === 0) {
+      if (initialSessionId && !restoredRef.current) {
+        restoredRef.current = true;
+        onInitialRestoreDone?.();
+      }
+      return;
+    }
 
     if (selectedCwd === null) {
       // If restoring a session, set cwd to match that session
@@ -283,7 +290,7 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
         setSelectedCwd(cwds[0]);
       }
     }
-  }, [allSessions, selectedCwd, initialSessionId, onSelectSession, onInitialRestoreDone]);
+  }, [loading, allSessions, selectedCwd, initialSessionId, onSelectSession, onInitialRestoreDone]);
 
   const commitCustomPath = useCallback(async () => {
     const path = customPathValue.trim();
@@ -292,16 +299,16 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
     setCustomPathValidating(true);
     setCustomPathError(null);
     try {
-      const data = await window.electron.invoke('cwd-validate', path);
-      if (data.error) {
-        setCustomPathError(data.error);
+      const data = await window.electron.invoke('cwd-validate', path) as { error?: string; valid?: boolean; formattedPath?: string; cwd?: string };
+      if ((data as { error?: string }).error) {
+        setCustomPathError((data as { error?: string }).error ?? null);
         return;
       }
       
       // 注册工作区到主进程
-      const regData = await window.electron.invoke('register-workspace', data.cwd ?? path);
-      if (regData.error) {
-        setCustomPathError(regData.error);
+      const regData = await window.electron.invoke('register-workspace', data.cwd ?? path) as { error?: string };
+      if ((regData as { error?: string }).error) {
+        setCustomPathError((regData as { error?: string }).error ?? null);
         return;
       }
 
@@ -318,12 +325,12 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
 
   const handleDefaultCwd = useCallback(async () => {
     try {
-      const data = await window.electron.invoke('default-cwd');
-      if (data.cwd) {
+      const data = await window.electron.invoke('default-cwd') as { cwd?: string; error?: string };
+      if ((data as { cwd?: string }).cwd) {
         // 默认目录也注册一下工作区
-        await window.electron.invoke('register-workspace', data.cwd);
+        await window.electron.invoke('register-workspace', (data as { cwd?: string }).cwd);
         
-        setSelectedCwd(data.cwd);
+        setSelectedCwd((data as { cwd?: string }).cwd || "");
         setCustomPathOpen(false);
         setCustomPathValue("");
         setCustomPathError(null);

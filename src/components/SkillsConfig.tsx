@@ -210,13 +210,13 @@ function AddSkillPanel({
     setSearchError(null);
     setResults([]);
     try {
-      const d = await window.electron.invoke("skills-search", { query: q.trim() });
-      if (d.error) {
-        setSearchError(d.error);
+      const d = await window.electron.invoke("skills-search", { query: q.trim() }) as { error?: string; results?: SkillSearchResult[] };
+      if ((d as { error?: string }).error) {
+        setSearchError((d as { error?: string }).error ?? null);
         return;
       }
-      setResults(d.results ?? []);
-      if ((d.results ?? []).length === 0) setSearchError("No skills found");
+      setResults((d as { results?: SkillSearchResult[] }).results ?? []);
+      if (((d as { results?: SkillSearchResult[] }).results ?? []).length === 0) setSearchError("No skills found");
     } catch (e) {
       setSearchError(String(e));
     } finally {
@@ -229,9 +229,9 @@ function AddSkillPanel({
       setInstalling(pkg);
       setInstallError(null);
       try {
-        const d = await window.electron.invoke("skills-install", { package: pkg, scope, cwd });
-        if (d.error) {
-          setInstallError(d.error);
+        const d = await window.electron.invoke("skills-install", { package: pkg, scope, cwd }) as { error?: string };
+        if ((d as { error?: string }).error) {
+          setInstallError((d as { error?: string }).error ?? null);
           return;
         }
         setInstalledPkgs((prev) => new Set(prev).add(pkg));
@@ -516,12 +516,12 @@ export function SkillsConfig({
     setLoading(true);
     setError(null);
     window.electron.invoke("skills-list", { cwd })
-      .then((d: { skills?: Skill[]; error?: string }) => {
-        if (d.error) {
-          setError(d.error);
+      .then((d: unknown) => {
+        if ((d as { error?: string }).error) {
+          setError((d as { error?: string }).error ?? null);
           return;
         }
-        const list = d.skills ?? [];
+        const list = (d as { skills?: Skill[] }).skills ?? [];
         setSkills(list);
         if (list.length > 0 && !selected) setSelected(list[0].filePath);
       })
@@ -541,9 +541,9 @@ export function SkillsConfig({
       const d = await window.electron.invoke("skills-patch", {
         filePath: skill.filePath,
         disableModelInvocation: next,
-      });
-      if (d.error) {
-        setSaveError(d.error);
+      }) as { error?: string };
+      if ((d as { error?: string }).error) {
+        setSaveError((d as { error?: string }).error ?? null);
         return;
       }
       setSkills((prev) =>

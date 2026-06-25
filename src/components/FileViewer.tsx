@@ -329,14 +329,15 @@ function ImageViewer({ filePath, cwd }: { filePath: string; cwd?: string }) {
     
     // Request watch setup
     window.electron.invoke('watch-file', encoded).then(res => {
-      if (res && res.success) {
+      if (res && (res as { success?: boolean }).success) {
         setWatching(true);
       }
     });
 
     // Listen for changes
-    const unsubChange = window.electron.on(`file-changed-${encoded}`, (d: { size?: number }) => {
-      if (typeof d.size === "number") setSize(d.size);
+    const unsubChange = window.electron.on(`file-changed-${encoded}`, (d: unknown) => {
+      const data = d as { size?: number };
+      if (typeof data.size === "number") setSize(data.size);
       setBust((b) => b + 1);
     });
 
@@ -474,13 +475,14 @@ function AudioViewer({ filePath, cwd }: { filePath: string; cwd?: string }) {
     const encoded = encodeFilePathForApi(filePath);
     
     window.electron.invoke('watch-file', encoded).then(res => {
-      if (res && res.success) {
+      if (res && (res as { success?: boolean }).success) {
         setWatching(true);
       }
     });
 
-    const unsubChange = window.electron.on(`file-changed-${encoded}`, (d: { size?: number }) => {
-      if (typeof d.size === "number") setSize(d.size);
+    const unsubChange = window.electron.on(`file-changed-${encoded}`, (d: unknown) => {
+      const data = d as { size?: number };
+      if (typeof data.size === "number") setSize(data.size);
       setDuration(null);
       setError(null);
       setBust((b) => b + 1);
@@ -591,6 +593,7 @@ function DocumentViewer({ filePath, cwd }: { filePath: string; cwd?: string }) {
     : `pi-file:///${encoded}?type=preview${bust ? `&v=${bust}` : ""}`;
 
   useEffect(() => {
+    let ignore = false;
     setBust(0);
     setSize(null);
     setError(null);
@@ -602,27 +605,35 @@ function DocumentViewer({ filePath, cwd }: { filePath: string; cwd?: string }) {
     }
 
     window.electron.invoke('file-meta', encoded)
-      .then((d: { size?: number; error?: string }) => {
-        if (d.error) setError(d.error);
-        if (typeof d.size === "number") {
-          setSize(d.size);
-          if (!isPdf && d.size > DOCX_PREVIEW_MAX_BYTES) {
+      .then((d: unknown) => {
+        const data = d as { size?: number; error?: string };
+        if (ignore) return;
+        if (data.error) setError(data.error);
+        if (typeof data.size === "number") {
+          setSize(data.size);
+          if (!isPdf && data.size > DOCX_PREVIEW_MAX_BYTES) {
             setError("DOCX too large for preview (>10MB)");
           }
         }
       })
-      .catch((e) => setError(String(e)));
+      .catch((e) => {
+        if (ignore) return;
+        setError(String(e));
+      });
 
     window.electron.invoke('watch-file', encoded).then(res => {
-      if (res && res.success) {
+      if (ignore) return;
+      if (res && (res as { success?: boolean }).success) {
         setWatching(true);
       }
     });
 
-    const unsubChange = window.electron.on(`file-changed-${encoded}`, (d: { size?: number }) => {
-      if (typeof d.size === "number") {
-        setSize(d.size);
-        if (!isPdf && d.size > DOCX_PREVIEW_MAX_BYTES) {
+    const unsubChange = window.electron.on(`file-changed-${encoded}`, (d: unknown) => {
+      const data = d as { size?: number };
+      if (ignore) return;
+      if (typeof data.size === "number") {
+        setSize(data.size);
+        if (!isPdf && data.size > DOCX_PREVIEW_MAX_BYTES) {
           setError("DOCX too large for preview (>10MB)");
           return;
         }
@@ -632,6 +643,7 @@ function DocumentViewer({ filePath, cwd }: { filePath: string; cwd?: string }) {
     });
 
     const unsubError = window.electron.on(`file-error-${encoded}`, () => {
+      if (ignore) return;
       setWatching(false);
     });
 
@@ -642,6 +654,7 @@ function DocumentViewer({ filePath, cwd }: { filePath: string; cwd?: string }) {
     };
 
     return () => {
+      ignore = true;
       if (unwatchRef.current) {
         unwatchRef.current();
         unwatchRef.current = null;
@@ -732,33 +745,21 @@ function TextFileViewer({ filePath, cwd }: Props) {
   const [changeCount, setChangeCount] = useState(0);
   const unwatchRef = useRef<(() => void) | null>(null);
 
-  const fetchContent = useCallback((filePath: string, isRefresh = false) => {
+  const fetchContent = useCallback((filePath: string) => {
     const encoded = encodeFilePathForApi(filePath);
     return window.electron.invoke('read-file', encoded)
-      .then((d: FileData & { error?: string }) => {
-        if (d.error) {
-          setError(d.error);
-          return null;
-        }
-        if (isRefresh) {
-          setData((prev) => {
-            if (prev) setPrevContent(prev.content);
-            return d;
-          });
-          setChangeCount((c) => c + 1);
-        } else {
-          setData(d);
-        }
-        return d;
+      .then((d: unknown) => {
+        const data = d as FileData & { error?: string };
+        return data;
       })
       .catch((e) => {
-        setError(String(e));
-        return null;
+        return { error: String(e) } as FileData & { error?: string };
       });
   }, []);
 
   // Initial load + SSE watch setup
   useEffect(() => {
+    let ignore = false;
     setLoading(true);
     setError(null);
     setData(null);
@@ -774,24 +775,51 @@ function TextFileViewer({ filePath, cwd }: Props) {
       unwatchRef.current = null;
     }
 
-    fetchContent(filePath).then((d) => {
-      if (d?.language === "markdown") setPreviewMode(true);
-    }).finally(() => setLoading(false));
+    fetchContent(filePath).then((d: unknown) => {
+      const data = d as FileData & { error?: string };
+      if (ignore) return;
+      if (data?.error) {
+        setError(data.error);
+        setLoading(false);
+        return;
+      }
+      if (data) {
+        setData(data as FileData);
+        if ((d as FileData).language === "markdown") setPreviewMode(true);
+      }
+      setLoading(false);
+    });
 
     // Set up SSE watch
     const encoded = encodeFilePathForApi(filePath);
     
     window.electron.invoke('watch-file', encoded).then(res => {
-      if (res && res.success) {
+      if (ignore) return;
+      if (res && (res as { success?: boolean }).success) {
         setWatching(true);
       }
     });
 
     const unsubChange = window.electron.on(`file-changed-${encoded}`, () => {
-      fetchContent(filePath, true);
+      fetchContent(filePath).then((d: unknown) => {
+        const data = d as FileData & { error?: string };
+        if (ignore) return;
+        if (data?.error) {
+          setError(data.error);
+          return;
+        }
+        if (data) {
+          setData((prev) => {
+            if (prev) setPrevContent(prev.content);
+            return data as FileData;
+          });
+          setChangeCount((c) => c + 1);
+        }
+      });
     });
 
     const unsubError = window.electron.on(`file-error-${encoded}`, () => {
+      if (ignore) return;
       setWatching(false);
     });
 
@@ -802,6 +830,7 @@ function TextFileViewer({ filePath, cwd }: Props) {
     };
 
     return () => {
+      ignore = true;
       if (unwatchRef.current) {
         unwatchRef.current();
         unwatchRef.current = null;

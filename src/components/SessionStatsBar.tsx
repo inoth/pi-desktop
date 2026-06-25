@@ -22,8 +22,8 @@ export function SessionStatsBar({ rightPanelOpen }: { rightPanelOpen: boolean })
   const [contextUsage, setContextUsage] = useState<ContextUsageData>(null);
 
   useEffect(() => {
-    const handleStats = (e: any) => setSessionStats(e.detail);
-    const handleContext = (e: any) => setContextUsage(e.detail);
+    const handleStats = (e: Event) => setSessionStats((e as CustomEvent).detail);
+    const handleContext = (e: Event) => setContextUsage((e as CustomEvent).detail);
 
     window.addEventListener("pi-session-stats", handleStats);
     window.addEventListener("pi-context-usage", handleContext);

@@ -3,8 +3,8 @@ export {};
 declare global {
   interface Window {
     electron: {
-      invoke: (channel: string, ...args: any[]) => Promise<any>;
-      on: (channel: string, func: (...args: any[]) => void) => () => void;
+      invoke: (channel: string, ...args: unknown[]) => Promise<unknown>;
+      on: (channel: string, func: (...args: unknown[]) => void) => () => void;
     };
   }
 }

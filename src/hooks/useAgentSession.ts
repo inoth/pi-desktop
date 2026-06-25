@@ -44,11 +44,6 @@ function streamReducer(state: StreamingState, action: StreamAction): StreamingSt
   }
 }
 
-interface AgentEvent {
-  type: string;
-  [key: string]: unknown;
-}
-
 interface CompactCommandResult {
   tokensBefore?: number;
   estimatedTokensAfter?: number;
@@ -141,7 +136,7 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
   const eventSourceRef = useRef<EventSource | null>(null);
   const sessionIdRef = useRef<string | null>(session?.id ?? null);
   const agentRunningRef = useRef(false);
-  const handleAgentEventRef = useRef<((event: AgentEvent) => void) | null>(null);
+  const handleAgentEventRef = useRef<((event: { type: string; [key: string]: unknown }) => void) | null>(null);
   const initialScrollDoneRef = useRef(false);
   const lastUserMsgRef = useRef<HTMLDivElement | null>(null);
   const pendingScrollToUserRef = useRef(false);
@@ -190,13 +185,13 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
       const d = data as SessionData & { agentState?: { running: boolean; state?: { isStreaming?: boolean; isCompacting?: boolean; contextUsage?: { percent: number | null; contextWindow: number; tokens: number | null } | null; systemPrompt?: string; thinkingLevel?: string } } };
       setData(d);
       setActiveLeafId(d.leafId);
-      setMessages(d.context.messages);
-      setEntryIds(d.context.entryIds ?? []);
+      setMessages((d as { context?: { messages: AgentMessage[]; entryIds: string[]; thinkingLevel?: string } }).context?.messages ?? []);
+      setEntryIds((d as { context?: { messages: AgentMessage[]; entryIds: string[]; thinkingLevel?: string } }).context?.entryIds ?? []);
       setCurrentModelOverride(null);
       setError(null);
       // If no live agent state, fall back to thinking level from session file
-      if (!d.agentState?.state?.thinkingLevel && d.context.thinkingLevel && d.context.thinkingLevel !== "off") {
-        setThinkingLevel(d.context.thinkingLevel as ThinkingLevelOption);
+      if (!d.agentState?.state?.thinkingLevel && (d as { context?: { messages: AgentMessage[]; entryIds: string[]; thinkingLevel?: string } }).context?.thinkingLevel && (d as { context?: { messages: AgentMessage[]; entryIds: string[]; thinkingLevel?: string } }).context?.thinkingLevel !== "off") {
+        setThinkingLevel((d as { context?: { messages: AgentMessage[]; entryIds: string[]; thinkingLevel?: string } }).context?.thinkingLevel as ThinkingLevelOption);
       }
       return d.agentState ?? null;
     } catch (e) {
@@ -210,8 +205,8 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
   const loadContext = useCallback(async (sid: string, leafId: string | null) => {
     try {
       const d = (await window.electron.invoke('get-session-context', sid, leafId));
-      setMessages(d.context.messages);
-      setEntryIds(d.context.entryIds ?? []);
+      setMessages((d as { context?: { messages: AgentMessage[]; entryIds: string[]; thinkingLevel?: string } }).context?.messages ?? []);
+      setEntryIds((d as { context?: { messages: AgentMessage[]; entryIds: string[]; thinkingLevel?: string } }).context?.entryIds ?? []);
     } catch (e) {
       console.error("Failed to load context:", e);
     }
@@ -232,31 +227,30 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
   const connectEvents = useCallback((sid: string) => {
     if (eventSourceRef.current) {
       // Here eventSourceRef.current is acting as a cleanup function for IPC
-      (eventSourceRef.current as any)();
+      ((eventSourceRef.current as unknown) as () => void)();
       eventSourceRef.current = null;
     }
     
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const cleanup = (window as any).electron.on(`agent-event-${sid}`, (event: any) => {
+        const cleanup = window.electron.on(`agent-event-${sid}`, ((event: { type: string; [key: string]: unknown }) => {
       try {
         handleAgentEventRef.current?.(event);
-      } catch {
-        // ignore
+      } catch (e) {
+        console.error("Agent event handler error:", e);
       }
-    });
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    eventSourceRef.current = cleanup as any;
+    }) as (...args: unknown[]) => void);
+        eventSourceRef.current = cleanup as unknown as EventSource;
     
     // Tell main process to subscribe and send events
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    (window as any).electron.invoke('agent-subscribe', sid).catch(() => {});
+        window.electron.invoke('agent-subscribe', sid).catch((e: Error) => {
+      console.error("Failed to subscribe to agent events:", e);
+    });
   }, []);
 
   useEffect(() => {
     agentRunningRef.current = agentRunning;
   }, [agentRunning]);
 
-  const handleAgentEvent = useCallback((event: AgentEvent) => {
+  const handleAgentEvent = useCallback((event: { type: string; [key: string]: unknown }) => {
     switch (event.type) {
       case "agent_start":
         agentRunningRef.current = true;
@@ -273,10 +267,11 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
         if (sessionIdRef.current) {
           loadSession(sessionIdRef.current);
           window.electron.invoke('agent-get-state', sessionIdRef.current)
-            .then((d: { state?: { contextUsage?: { percent: number | null; contextWindow: number; tokens: number | null } | null; systemPrompt?: string } }) => {
-              if (d.state?.contextUsage !== undefined) setContextUsage(d.state.contextUsage ?? null);
-              if (d.state?.systemPrompt !== undefined) setSystemPrompt(d.state.systemPrompt ?? null);
-            })
+            .then(((d: unknown) => {
+              const data = d as { state?: { contextUsage?: { percent: number | null; contextWindow: number; tokens: number | null } | null; systemPrompt?: string } };
+              if (data.state?.contextUsage !== undefined) setContextUsage(data.state.contextUsage ?? null);
+              if (data.state?.systemPrompt !== undefined) setSystemPrompt(data.state.systemPrompt ?? null);
+            }) as (value: unknown) => void)
             .catch(() => {});
         }
         onAgentEnd?.();
@@ -378,8 +373,7 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
         const { PRESET_NONE, PRESET_DEFAULT, PRESET_FULL } = await import("@/components/ToolPanel");
         const toolNames = toolPreset === "none" ? PRESET_NONE : toolPreset === "default" ? PRESET_DEFAULT : PRESET_FULL;
         
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        const result = await (window as any).electron.invoke('agent-new', {
+                const result = await window.electron.invoke('agent-new', {
           cwd: newSessionCwd,
           type: "prompt",
           message,
@@ -388,8 +382,8 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
           ...(selectedModel ? { provider: selectedModel.provider, modelId: selectedModel.modelId } : {}),
           ...(thinkingLevel !== "auto" ? { thinkingLevel } : {}),
         });
-        if (!result.success) throw new Error("Failed to create agent session");
-        const realId = result.sessionId;
+        if (!(result as { success?: boolean }).success) throw new Error("Failed to create agent session");
+        const realId = (result as { sessionId: string }).sessionId;
         sessionIdRef.current = realId;
         connectEvents(realId);
         onSessionCreated?.({
@@ -620,7 +614,7 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
     return () => {
       if (typeof window !== "undefined" && ('electron' in window)) {
         if (eventSourceRef.current) {
-          (eventSourceRef.current as any)();
+          ((eventSourceRef.current as unknown) as () => void)();
           eventSourceRef.current = null;
         }
       } else {
@@ -682,24 +676,23 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
   // Load model list
   useEffect(() => {
     // 桌面端使用 IPC 调用
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    window.electron.invoke('get-models').then((d: any) => {
-      setModelNames(d.models);
-      if (d.thinkingLevels) setModelThinkingLevels(d.thinkingLevels);
-      if (d.thinkingLevelMaps) setModelThinkingLevelMaps(d.thinkingLevelMaps);
-      if (d.modelList) {
-        setModelList(d.modelList);
-        if (isNew && d.modelList.length > 0) {
-          const def = d.defaultModel;
-          // eslint-disable-next-line @typescript-eslint/no-explicit-any
-          const match = def && d.modelList.find((m: any) => m.id === def.modelId && m.provider === def.provider);
+        window.electron.invoke('get-models').then(((d: unknown) => {
+      const data = d as { models: Record<string, string>; thinkingLevels?: Record<string, string[]>; thinkingLevelMaps?: Record<string, Record<string, string | null>>; modelList?: { id: string; name: string; provider: string }[]; defaultModel?: { provider: string; modelId: string } };
+      setModelNames(data.models);
+      if (data.thinkingLevels) setModelThinkingLevels(data.thinkingLevels);
+      if (data.thinkingLevelMaps) setModelThinkingLevelMaps(data.thinkingLevelMaps);
+      if (data.modelList) {
+        setModelList(data.modelList);
+        if (isNew && data.modelList.length > 0) {
+          const def = data.defaultModel;
+                    const match = def && data.modelList.find((m: { id: string, provider: string }) => m.id === def.modelId && m.provider === def.provider);
           const selected = match
             ? { provider: match.provider, modelId: match.id }
-            : { provider: d.modelList[0].provider, modelId: d.modelList[0].id };
+            : { provider: data.modelList[0].provider, modelId: data.modelList[0].id };
           setNewSessionModel(selected);
         }
       }
-    }).catch(() => {});
+        }) as (value: unknown) => void).catch(() => {});
   }, [isNew, modelsRefreshKey, setNewSessionModel]);
 
   // Compact error auto-dismiss

@@ -4,7 +4,7 @@ export async function sendAgentCommand<T = unknown>(
   sessionId: string,
   command: Record<string, unknown>,
 ): Promise<T> {
-  const result = await window.electron.invoke('agent-send', sessionId, command);
+  const result = await window.electron.invoke('agent-send', sessionId, command) as { success?: boolean; error?: string; data?: T };
   if (!result.success) throw new Error(result.error || "Failed");
   return result.data as T;
 }

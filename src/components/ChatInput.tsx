@@ -205,6 +205,7 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
 
       if (e.key === "Enter" && !e.shiftKey && (isComposing || recentlyComposed)) {
         if (recentlyComposed) e.preventDefault();
+        e.stopPropagation();
         return;
       }
 
