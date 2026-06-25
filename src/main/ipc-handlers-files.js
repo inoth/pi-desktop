@@ -2,7 +2,6 @@ const { ipcMain, protocol } = require('electron');
 const fs = require('fs');
 const path = require('path');
 const os = require('os');
-const { getRpcSession } = require('./rpc-manager.js');
 
 // 简单判断是否是绝对路径
 function isWindowsAbsolutePath(filePath) {
