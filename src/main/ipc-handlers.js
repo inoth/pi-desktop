@@ -858,6 +858,7 @@ function registerIpcHandlers() {
             ...process.env,
             PI_OFFLINE: "1",
             PI_SKIP_VERSION_CHECK: "1",
+            ELECTRON_RUN_AS_NODE: "1",
           },
           maxBuffer: 1024 * 1024,
         });
