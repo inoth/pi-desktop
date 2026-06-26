@@ -86,6 +86,7 @@ class AgentSessionWrapper {
             : null,
           systemPrompt: this.inner.agent.state?.systemPrompt ?? "",
           thinkingLevel: this.inner.agent.state?.thinkingLevel ?? "off",
+          streamingMessage: this.inner.agent.state?.streamingMessage,
         };
       }
 
@@ -270,6 +271,15 @@ async function startRpcSession(sessionId, sessionFile, cwd, toolNames) {
 
     const wrapper = new AgentSessionWrapper(inner);
     wrapper.start();
+    wrapper.onEvent((event) => {
+      if (event.type === "agent_start" || event.type === "agent_end") {
+        // eslint-disable-next-line @typescript-eslint/no-require-imports
+        const { BrowserWindow } = require('electron');
+        BrowserWindow.getAllWindows().forEach(w => {
+          w.webContents.send('sessions-changed');
+        });
+      }
+    });
 
     const realSessionId = inner.sessionId;
     const realSessionFile = inner.sessionFile;

@@ -298,9 +298,15 @@ function registerIpcHandlers() {
     return { success: true };
   });
 
-  ipcMain.handle('agent-unsubscribe', async () => {
-    // Cannot easily unsubscribe without keeping the reference, but we rely on WebContents destroyed to cleanup? 
-    // Actually the session has idleTimer and cleans itself up.
+  ipcMain.handle('agent-unsubscribe', async (event, id) => {
+    let session = getRpcSession(id);
+    if (session && session.isAlive()) {
+      // The session will automatically clean up when there are no subscribers
+      // Actually we just need to let the frontend stop listening to the event
+      // However, right now session.onEvent is a global emitter on the session.
+      // We need to figure out a way to clear the specific listener for this sender/window,
+      // or at least clear the session when all windows unsubscribe.
+    }
     return { success: true };
   });
 
@@ -357,6 +363,10 @@ function registerIpcHandlers() {
 
       const sessions = piSessions.map((s) => {
         pathCache.set(s.id, s.path);
+        
+        const rpcSession = getRpcSession(s.id);
+        const running = rpcSession?.isAlive() && rpcSession.inner?.isStreaming;
+        
         return {
           path: s.path,
           id: s.id,
@@ -367,6 +377,7 @@ function registerIpcHandlers() {
           messageCount: s.messageCount,
           firstMessage: s.firstMessage || "(no messages)",
           parentSessionId: s.parentSessionPath ? pathToId.get(s.parentSessionPath) : undefined,
+          running: !!running,
         };
       });
       return { sessions };

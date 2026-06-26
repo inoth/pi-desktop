@@ -182,6 +182,7 @@ export interface SessionInfo {
   messageCount: number;
   firstMessage: string;
   parentSessionId?: string; // set if this session was forked from another
+  running?: boolean;
 }
 
 export interface SessionContext {

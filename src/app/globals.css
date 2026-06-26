@@ -356,3 +356,22 @@ span.linenumber {
     display: none !important;
   }
 }
+
+@keyframes typing-dot-bounce {
+  0%, 60%, 100% { transform: translateY(0); opacity: 0.4; }
+  30% { transform: translateY(-2px); opacity: 1; }
+}
+.typing-dot {
+  animation: typing-dot-bounce 1s infinite;
+}
+
+@keyframes completed-dot-fade {
+  0% { opacity: 1; }
+  90% { opacity: 1; }
+  100% { opacity: 0; }
+}
+.completed-dot {
+  animation: completed-dot-fade 60s forwards;
+  animation-fill-mode: forwards;
+  opacity: 0;
+}

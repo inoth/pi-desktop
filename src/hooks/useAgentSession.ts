@@ -241,9 +241,37 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
         eventSourceRef.current = cleanup as unknown as EventSource;
     
     // Tell main process to subscribe and send events
-        window.electron.invoke('agent-subscribe', sid).catch((e: Error) => {
+    window.electron.invoke('agent-subscribe', sid).catch((e: Error) => {
       console.error("Failed to subscribe to agent events:", e);
     });
+
+    window.electron.invoke('agent-get-state', sid)
+      .then(((d: unknown) => {
+        const data = d as { running: boolean; state?: { isStreaming?: boolean; isCompacting?: boolean; contextUsage?: { percent: number | null; contextWindow: number; tokens: number | null } | null; systemPrompt?: string; thinkingLevel?: string; errorMessage?: string; streamingMessage?: unknown } };
+        if (data.state) {
+          if (data.state.isCompacting !== undefined) setIsCompacting(data.state.isCompacting);
+          if (data.state.contextUsage !== undefined) setContextUsage(data.state.contextUsage ?? null);
+          if (data.state.systemPrompt !== undefined) setSystemPrompt(data.state.systemPrompt ?? null);
+          if (data.state.thinkingLevel !== undefined) setThinkingLevel((data.state.thinkingLevel as ThinkingLevelOption) ?? "auto");
+          if (data.state.isStreaming !== undefined) {
+             if (data.state.isStreaming) {
+               setAgentRunning(true);
+               agentRunningRef.current = true;
+               setAgentPhase({ kind: "waiting_model" });
+               dispatch({ type: "start" });
+               if (data.state.streamingMessage) {
+                  dispatch({ type: "update", message: normalizeToolCalls(data.state.streamingMessage as AgentMessage) });
+               }
+             } else {
+               setAgentRunning(false);
+               agentRunningRef.current = false;
+               setAgentPhase(null);
+               dispatch({ type: "end" });
+             }
+          }
+        }
+      }) as (value: unknown) => void)
+      .catch(() => {});
   }, []);
 
   useEffect(() => {
@@ -597,11 +625,7 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
       loadSession(session.id, true, true).then((agentState) => {
         if (agentState?.running) {
           loadTools(session.id);
-          if (agentState.state?.isStreaming) {
-            setAgentRunning(true);
-            setAgentPhase({ kind: "waiting_model" });
-            connectEvents(session.id);
-          }
+          connectEvents(session.id); // connectEvents will fetch latest streaming state
         }
         if (agentState?.state) {
           if (agentState.state.isCompacting !== undefined) setIsCompacting(agentState.state.isCompacting);

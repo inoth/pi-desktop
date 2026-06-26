@@ -242,6 +242,13 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
   }, [loadSessions, refreshKey]);
 
   useEffect(() => {
+    const cleanup = window.electron.on('sessions-changed', () => {
+      loadSessions(false);
+    });
+    return cleanup;
+  }, [loadSessions]);
+
+  useEffect(() => {
     if (explorerRefreshKey !== undefined) setExplorerKey((k) => k + 1);
   }, [explorerRefreshKey]);
 
@@ -915,6 +922,17 @@ function SessionItem({
   const [deleting, setDeleting] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
 
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    if (session.running === false && session.modified) {
+      const msAgo = Date.now() - new Date(session.modified).getTime();
+      if (msAgo < 60000) {
+        const timer = setTimeout(() => setNow(Date.now()), 60000 - msAgo);
+        return () => clearTimeout(timer);
+      }
+    }
+  }, [session.running, session.modified]);
+
   const title = session.name || session.firstMessage.slice(0, 50) || session.id.slice(0, 12);
 
   const startRename = useCallback((e: React.MouseEvent) => {
@@ -1072,10 +1090,32 @@ function SessionItem({
                 textOverflow: "ellipsis",
                 whiteSpace: "nowrap",
                 color: "var(--text)",
+                display: "flex",
+                alignItems: "center",
+                gap: 6,
               }}
               title={title}
             >
               {title}
+              {session.running && (
+                <div style={{
+                  display: "flex", gap: 3, alignItems: "center",
+                  background: "var(--bg-panel)", padding: "2px 5px",
+                  borderRadius: 10, flexShrink: 0
+                }}>
+                  <div className="typing-dot" style={{ width: 4, height: 4, borderRadius: "50%", background: "var(--accent)" }} />
+                  <div className="typing-dot" style={{ width: 4, height: 4, borderRadius: "50%", background: "var(--accent)", animationDelay: "0.2s" }} />
+                  <div className="typing-dot" style={{ width: 4, height: 4, borderRadius: "50%", background: "var(--accent)", animationDelay: "0.4s" }} />
+                </div>
+              )}
+              {session.running === false && session.modified && now - new Date(session.modified).getTime() < 60000 && (
+                <div style={{
+                  width: 6, height: 6, borderRadius: "50%",
+                  background: "#4ade80", flexShrink: 0,
+                  boxShadow: "0 0 4px rgba(74,222,128,0.5)",
+                  animationDelay: `-${(now - new Date(session.modified).getTime()) / 1000}s`
+                }} title="Completed recently" className="completed-dot" />
+              )}
             </div>
             <div style={{ marginTop: 2, display: "flex", gap: 8, color: "var(--text-dim)", fontSize: 11 }}>
               <span title={session.modified}>{formatRelativeTime(session.modified)}</span>
