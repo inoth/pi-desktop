@@ -21,6 +21,12 @@ npx pi-web --port 8080    # 自定义端口
 npm run build
 ```
 
+```bash
+# 包损坏运行
+sudo xattr -rd com.apple.quarantine "/Applications/Pi Desktop.app"
+```
+
+
 ## 架构
 
 ```
