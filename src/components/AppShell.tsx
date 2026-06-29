@@ -205,27 +205,24 @@ export function AppShell() {
 
   const handleSessionDeleted = useCallback((sessionId: string) => {
     setRefreshKey((k) => k + 1);
-    setSelectedSession((prevSelected) => {
-      if (prevSelected?.id === sessionId) {
-        const cwd = prevSelected.cwd;
-        setNewSessionCwd(cwd ?? null);
-        setSessionKey((k) => k + 1);
-        setBranchTree([]);
-        setBranchActiveLeafId(null);
-        setSystemPrompt(null);
-        setActiveTopPanel(null);
-        if (typeof window !== "undefined" && !window.location.protocol.startsWith("app")) {
-          router.replace("/", { scroll: false });
-        } else {
-          if (typeof window !== "undefined") {
-            window.history.pushState(null, "", "/");
-          }
+    if (selectedSession?.id === sessionId) {
+      const cwd = selectedSession.cwd;
+      setNewSessionCwd(cwd ?? null);
+      setSelectedSession(null);
+      setSessionKey((k) => k + 1);
+      setBranchTree([]);
+      setBranchActiveLeafId(null);
+      setSystemPrompt(null);
+      setActiveTopPanel(null);
+      if (typeof window !== "undefined" && !window.location.protocol.startsWith("app")) {
+        router.replace("/", { scroll: false });
+      } else {
+        if (typeof window !== "undefined") {
+          window.history.pushState(null, "", "/");
         }
-        return null;
       }
-      return prevSelected;
-    });
-  }, [router]);
+    }
+  }, [router, selectedSession]);
 
   const handleOpenFile = useCallback((filePath: string, fileName: string) => {
     const tabId = `file:${filePath}`;
@@ -240,12 +237,14 @@ export function AppShell() {
   const handleCloseFileTab = useCallback((tabId: string) => {
     setFileTabs((prev) => {
       const next = prev.filter((t) => t.id !== tabId);
-      if (next.length === 0) setRightPanelOpen(false);
       return next;
     });
+    const remaining = fileTabs.filter((t) => t.id !== tabId);
+    if (remaining.length === 0) {
+      setRightPanelOpen(false);
+    }
     setActiveFileTabId((cur) => {
       if (cur !== tabId) return cur;
-      const remaining = fileTabs.filter((t) => t.id !== tabId);
       return remaining.length > 0 ? remaining[remaining.length - 1].id : null;
     });
   }, [fileTabs]);
