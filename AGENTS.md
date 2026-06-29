@@ -15,48 +15,41 @@ Lint: `node node_modules/next/dist/bin/next lint`
 ## Architecture
 
 ```
-Browser                Next.js Server              AgentSession (in-process)
-  │                        │                               │
-  ├─ GET /api/sessions ────▶ reads ~/.pi/agent/sessions/   │
-  ├─ GET /api/sessions/[id] reads .jsonl file directly     │
-  │                        │                               │
-  ├─ send message ─────────▶ POST /api/agent/[id]          │
-  │                        │   startRpcSession() ─────────▶│ createAgentSession()
-  │                        │   session.send(cmd) ─────────▶│ session.prompt()
-  │                        │                               │
-  ├─ SSE connect ──────────▶ GET /api/agent/[id]/events    │
-  │                        │   session.onEvent() ◀─────────│ session.subscribe()
-  │◀── data: {...} ─────────│                               │
+Browser (React)               Electron Main Process          AgentSession (in-process)
+  │                                    │                               │
+  ├─ IPC get-sessions ────────────────▶│ reads ~/.pi/agent/sessions/   │
+  ├─ IPC get-session ─────────────────▶│ reads .jsonl file directly    │
+  │                                    │                               │
+  ├─ IPC agent-send ──────────────────▶│ startRpcSession() ───────────▶│ createAgentSession()
+  │                                    │ session.send(cmd) ───────────▶│ session.prompt()
+  │                                    │                               │
+  ├─ IPC agent-subscribe ─────────────▶│ session.onEvent() ◀───────────│ session.subscribe()
+  │◀── IPC agent-event-<id> ───────────│                               │
 ```
 
-**Session browsing** (read-only): reads `.jsonl` files directly via `lib/session-reader.ts` — no AgentSession created.  
-**Sending a message**: `startRpcSession()` in `lib/rpc-manager.ts` creates an AgentSession in-process.
+**Session browsing** (read-only): reads `.jsonl` files directly via IPC `get-sessions` and `get-session` — no AgentSession created.  
+**Sending a message**: `startRpcSession()` in `src/main/rpc-manager.js` creates an AgentSession in-process.
 
 ---
 
 ## File Map
 
 ```
-app/api/
-  sessions/route.ts               GET  list all sessions
-  sessions/[id]/route.ts          GET/PATCH/DELETE session
-  sessions/[id]/context/route.ts  GET ?leafId= — context for a specific leaf
-  sessions/new/route.ts           returns 410 (no longer used)
-  agent/new/route.ts              POST { cwd, message, toolNames?, provider?, modelId? }
-  agent/[id]/route.ts             GET state | POST any command
-  agent/[id]/events/route.ts      GET SSE stream
-  files/[...path]/route.ts        GET file contents for viewer
-  models/route.ts                 GET { models, modelList, defaultModel }
-  models-config/route.ts          GET/POST — read/write ~/.pi/agent/models.json
+src/main/
+  ipc-handlers.js     Electron IPC handlers (agent-new, get-sessions, etc.)
+  ipc-handlers-files.js Electron IPC handlers for file operations
+  rpc-manager.js      AgentSessionWrapper + registry + startRpcSession
 
-lib/
-  rpc-manager.ts      AgentSessionWrapper + registry + startRpcSession
-  session-reader.ts   parse .jsonl; getModelNameMap/getModelList/getDefaultModel
-  types.ts            shared TypeScript types
+src/lib/
+  agent-client.ts     Client-side helper for agent IPC (sendAgentCommand)
+  file-paths.ts       Path resolution utilities
+  markdown.ts         Markdown processing
   normalize.ts        normalizeToolCalls() — field name mismatch between file format and our types
-  system-prompt-off.ts  minimal system prompt when all tools are disabled
+  npx.ts              NPX execution utilities
+  pi-types.ts         Shared TypeScript types
+  types.ts            Shared TypeScript types
 
-components/
+src/components/
   AppShell.tsx        layout + URL state + tab management
   SessionSidebar.tsx  session tree + FileExplorer
   ChatWindow.tsx      messages + streaming + SSE + fork/navigate logic
@@ -69,15 +62,23 @@ components/
   FileExplorer.tsx    file tree inside sidebar
   FileViewer.tsx      file content in a tab
   TabBar.tsx          tab bar (Chat + open file tabs)
+  SessionStatsBar.tsx Session statistics display
+  SkillsConfig.tsx    Skills configuration modal
+
+src/hooks/
+  useAgentSession.ts  React hook for managing agent session state via IPC
+  useAudio.ts         Audio playback hook
+  useDragDrop.ts      Drag and drop hook
+  useTheme.ts         Theme management hook
 ```
 
 ---
 
 ## Key Design Decisions & Traps
 
-### AgentSession lifecycle (`lib/rpc-manager.ts`)
+### AgentSession lifecycle (`src/main/rpc-manager.js`)
 - One `AgentSessionWrapper` per session id, keyed in `globalThis.__piSessions`
-- `globalThis` survives Next.js hot-reload; plain module-level Map does not
+- `globalThis` survives hot-reload; plain module-level Map does not
 - Idle timeout: 10 minutes. Concurrent `startRpcSession()` calls share a single start Promise (`globalThis.__piStartLocks`)
 
 ### Fork must destroy the wrapper immediately
@@ -87,25 +88,19 @@ components/
 
 ### Two kinds of branching — don't confuse them
 - **Fork** (Fork button on user message): creates a new independent `.jsonl` file. Shown as a child in the sidebar tree via `parentSession` header field.
-- **In-session branch** (Continue button / BranchNavigator): calls `navigate_tree` within the same file. Multiple entries share the same `parentId`. Switching between them calls `/api/sessions/[id]/context?leafId=`.
+- **In-session branch** (Continue button / BranchNavigator): calls `navigate_tree` within the same file. Multiple entries share the same `parentId`. Switching between them calls IPC `get-session-context` with `leafId`.
 
 ### Session files can be fully rewritten
 `parentSession` in the header is **display metadata only** — has zero effect on chat content. Safe to `writeFileSync` the entire file (pi does this itself during migrations). Used when cascade-reparenting children on delete.
 
 ### ToolCall field normalization
-Pi stores toolCall blocks as `{type:"toolCall", id, name, arguments}` but `ToolCallContent` uses `{toolCallId, toolName, input}`. `normalizeToolCalls()` in `lib/normalize.ts` handles this — called in both `session-reader.ts` (file load) and `ChatWindow.handleAgentEvent()` (streaming).
-
-### New session tool preset
-Tool names are passed at session creation (`POST /api/agent/new` → `toolNames[]`). For existing sessions, the active preset is inferred on mount via `get_tools` → `getPresetFromTools()`. When tools are fully disabled (`toolNames = []`), `rpc-manager.ts` injects a minimal system prompt via `system-prompt-off.ts` + `DefaultResourceLoader`.
-
-### Model defaults for new sessions
-`GET /api/models` returns `defaultModel` read from `~/.pi/agent/settings.json`. `ChatWindow` pre-selects this on mount for new sessions.
+Pi stores toolCall blocks as `{type:"toolCall", id, name, arguments}` but `ToolCallContent` uses `{toolCallId, toolName, input}`. `normalizeToolCalls()` in `src/lib/normalize.ts` handles this.
 
 ### SSE reconnect on page refresh mid-stream
-On `ChatWindow` mount, `GET /api/agent/[id]` is called. If `state.isStreaming === true`, SSE is reconnected automatically. `thinkingLevel` and `isCompacting` are also synced from this response.
+On `ChatWindow` mount, IPC `agent-get-state` is called. If `state.isStreaming === true`, SSE is reconnected automatically via IPC `agent-subscribe`. `thinkingLevel` and `isCompacting` are also synced from this response.
 
 ### Compaction SSE events
-Newer pi emits `compaction_start` / `compaction_end`; older versions emitted `auto_compaction_start` / `auto_compaction_end`. `handleAgentEvent` accepts both sets to keep `isCompacting` in sync. Manual compact is a blocking POST — the button stays disabled until the response returns.
+Newer pi emits `compaction_start` / `compaction_end`; older versions emitted `auto_compaction_start` / `auto_compaction_end`. `handleAgentEvent` accepts both sets to keep `isCompacting` in sync. Manual compact is a blocking IPC call — the button stays disabled until the response returns.
 
 ### Orphaned sessions
 Sessions whose first line can't be parsed as a valid header are marked `orphaned: true` in the API response — displayed with an "incomplete" badge in the sidebar and not clickable.
@@ -130,7 +125,7 @@ Location: `~/.pi/agent/sessions/<encoded-cwd>/<timestamp>_<uuid>.jsonl`
 
 ---
 
-## CSS Variables (`app/globals.css`)
+## CSS Variables (`src/app/globals.css`)
 
 ```
 --bg --bg-panel --bg-hover --bg-selected --border

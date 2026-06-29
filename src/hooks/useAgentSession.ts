@@ -257,7 +257,8 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
              if (data.state.isStreaming) {
                setAgentRunning(true);
                agentRunningRef.current = true;
-               setAgentPhase({ kind: "waiting_model" });
+               // Don't overwrite agent phase if it's already set to something more specific (like tools)
+               setAgentPhase(prev => prev || { kind: "waiting_model" });
                dispatch({ type: "start" });
                if (data.state.streamingMessage) {
                   dispatch({ type: "update", message: normalizeToolCalls(data.state.streamingMessage as AgentMessage) });
@@ -268,7 +269,19 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
                setAgentPhase(null);
                dispatch({ type: "end" });
              }
+          } else if (data.running) {
+             // Fallback if isStreaming is not explicitly in state but the session is running
+             setAgentRunning(true);
+             agentRunningRef.current = true;
+             setAgentPhase(prev => prev || { kind: "waiting_model" });
+             dispatch({ type: "start" });
           }
+        } else if (data.running) {
+          // Absolute fallback if data.state is undefined but session is running
+          setAgentRunning(true);
+          agentRunningRef.current = true;
+          setAgentPhase(prev => prev || { kind: "waiting_model" });
+          dispatch({ type: "start" });
         }
       }) as (value: unknown) => void)
       .catch(() => {});
@@ -626,6 +639,20 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
         if (agentState?.running) {
           loadTools(session.id);
           connectEvents(session.id); // connectEvents will fetch latest streaming state
+          
+          // Ensure local state reflects that it is running
+          setAgentRunning(true);
+          agentRunningRef.current = true;
+          
+          // Only start stream and waiting_model if we don't already have streaming state
+          // from the loadSession call we just made
+          if (!agentState?.state?.isStreaming) {
+             setAgentPhase({ kind: "waiting_model" });
+             dispatch({ type: "start" });
+          } else if (agentState?.state?.isStreaming && (agentState.state as any).streamingMessage) {
+             dispatch({ type: "start" });
+             dispatch({ type: "update", message: normalizeToolCalls((agentState.state as any).streamingMessage as AgentMessage) });
+          }
         }
         if (agentState?.state) {
           if (agentState.state.isCompacting !== undefined) setIsCompacting(agentState.state.isCompacting);

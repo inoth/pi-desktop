@@ -1104,7 +1104,7 @@ function SessionItem({
               title={title}
             >
               {title}
-              {session.running && !isSelected && (
+              {session.running && (
                 <div style={{
                   display: "flex", gap: 3, alignItems: "center",
                   background: "var(--bg-panel)", padding: "2px 5px",
@@ -1115,7 +1115,7 @@ function SessionItem({
                   <div className="typing-dot" style={{ width: 4, height: 4, borderRadius: "50%", background: "var(--accent)", animationDelay: "0.4s" }} />
                 </div>
               )}
-              {session.running === false && !isSelected && session.modified && session.modified !== seenModified && now - new Date(session.modified).getTime() < 60000 && (
+              {session.running === false && session.modified && session.modified !== seenModified && now - new Date(session.modified).getTime() < 60000 && (
                 <div style={{
                   width: 6, height: 6, borderRadius: "50%",
                   background: "#4ade80", flexShrink: 0,

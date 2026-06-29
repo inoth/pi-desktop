@@ -17,12 +17,20 @@ interface Props {
 }
 
 export function TabBar({ tabs, activeTabId, onSelectTab, onCloseTab }: Props) {
-  const [sessionRunning, setSessionRunning] = useState(false);
+  
 
+  const [runningSessions, setRunningSessions] = useState<Record<string, boolean>>({});
+  
   useEffect(() => {
-    const handleRunning = (e: Event) => setSessionRunning((e as CustomEvent).detail);
-    window.addEventListener("pi-session-running", handleRunning);
-    return () => window.removeEventListener("pi-session-running", handleRunning);
+    const handleRunningUpdate = (e: Event) => {
+      const { sessionId, running } = (e as CustomEvent).detail;
+      setRunningSessions(prev => ({
+        ...prev,
+        [sessionId]: running
+      }));
+    };
+    window.addEventListener("pi-session-running-status-update", handleRunningUpdate);
+    return () => window.removeEventListener("pi-session-running-status-update", handleRunningUpdate);
   }, []);
   const [hoveredClose, setHoveredClose] = useState<string | null>(null);
 
@@ -77,6 +85,17 @@ export function TabBar({ tabs, activeTabId, onSelectTab, onCloseTab }: Props) {
             >
               {tab.label}
             </span>
+            {tab.id.startsWith('session:') && runningSessions[tab.id.replace('session:', '')] && (
+              <div style={{
+                display: "flex", gap: 3, alignItems: "center",
+                background: "transparent", padding: "0 2px",
+                flexShrink: 0
+              }} title="Running">
+                <div className="typing-dot" style={{ width: 4, height: 4, borderRadius: "50%", background: "var(--accent)" }} />
+                <div className="typing-dot" style={{ width: 4, height: 4, borderRadius: "50%", background: "var(--accent)", animationDelay: "0.2s" }} />
+                <div className="typing-dot" style={{ width: 4, height: 4, borderRadius: "50%", background: "var(--accent)", animationDelay: "0.4s" }} />
+              </div>
+            )}
             <button
               onClick={(e) => { e.stopPropagation(); onCloseTab(tab.id); }}
               onMouseEnter={() => setHoveredClose(tab.id)}

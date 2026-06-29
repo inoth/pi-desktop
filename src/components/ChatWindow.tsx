@@ -143,7 +143,19 @@ export function ChatWindow({ session, newSessionCwd, onAgentEnd, onSessionCreate
     : null;
   useEffect(() => {
     updateSessionRunning(agentRunning);
-  }, [agentRunning]);
+    // Send a "session-running-status-update" to inform AppShell about this specific session's state
+    if (typeof window !== "undefined" && session?.id) {
+      window.dispatchEvent(new CustomEvent("pi-session-running-status-update", { 
+        detail: { sessionId: session.id, running: agentRunning } 
+      }));
+    }
+  }, [agentRunning, session?.id]);
+
+  useEffect(() => {
+    return () => {
+      // updateSessionRunning(false);
+    };
+  }, []);
 
   const contextUsageRef = useRef(contextUsage);
   contextUsageRef.current = contextUsage;
@@ -176,9 +188,9 @@ export function ChatWindow({ session, newSessionCwd, onAgentEnd, onSessionCreate
       ref={chatInputRef}
       onSend={handleSend}
       onAbort={handleAbort}
-      onSteer={agentRunning ? handleSteer : undefined}
-      onFollowUp={agentRunning ? handleFollowUp : undefined}
-      isStreaming={agentRunning}
+      onSteer={(agentRunning || streamState.isStreaming) ? handleSteer : undefined}
+      onFollowUp={(agentRunning || streamState.isStreaming) ? handleFollowUp : undefined}
+      isStreaming={agentRunning || streamState.isStreaming}
       model={displayModelValue}
       modelNames={modelNames}
       modelList={modelList}
