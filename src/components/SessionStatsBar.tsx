@@ -5,6 +5,12 @@ import { useState, useEffect } from "react";
 export type SessionStatsData = { tokens: { input: number; output: number; cacheRead: number; cacheWrite: number }; cost?: number } | null;
 export type ContextUsageData = { percent: number | null; contextWindow: number; tokens: number | null } | null;
 
+export function updateSessionRunning(running: boolean) {
+  if (typeof window !== "undefined") {
+    window.dispatchEvent(new CustomEvent("pi-session-running", { detail: running }));
+  }
+}
+
 export function updateSessionStats(stats: SessionStatsData) {
   if (typeof window !== "undefined") {
     window.dispatchEvent(new CustomEvent("pi-session-stats", { detail: stats }));
@@ -19,22 +25,26 @@ export function updateContextUsage(usage: ContextUsageData) {
 
 export function SessionStatsBar({ rightPanelOpen }: { rightPanelOpen: boolean }) {
   const [sessionStats, setSessionStats] = useState<SessionStatsData>(null);
+  const [sessionRunning, setSessionRunning] = useState(false);
   const [contextUsage, setContextUsage] = useState<ContextUsageData>(null);
 
   useEffect(() => {
     const handleStats = (e: Event) => setSessionStats((e as CustomEvent).detail);
+    const handleRunning = (e: Event) => setSessionRunning((e as CustomEvent).detail);
     const handleContext = (e: Event) => setContextUsage((e as CustomEvent).detail);
 
     window.addEventListener("pi-session-stats", handleStats);
+    window.addEventListener("pi-session-running", handleRunning);
     window.addEventListener("pi-context-usage", handleContext);
 
     return () => {
       window.removeEventListener("pi-session-stats", handleStats);
+      window.removeEventListener("pi-session-running", handleRunning);
       window.removeEventListener("pi-context-usage", handleContext);
     };
   }, []);
 
-  if (!sessionStats && !contextUsage) return null;
+  if (!sessionStats && !contextUsage && !sessionRunning) return null;
 
   const t = sessionStats?.tokens;
   const c = sessionStats?.cost ?? 0;
@@ -78,6 +88,16 @@ export function SessionStatsBar({ rightPanelOpen }: { rightPanelOpen: boolean })
         fontVariantNumeric: "tabular-nums",
       }}
     >
+      {sessionRunning && (
+        <span style={{ display: "flex", alignItems: "center", gap: 6, color: "var(--accent)", fontWeight: 500 }}>
+          <div style={{ display: "flex", gap: 3, alignItems: "center" }}>
+            <div className="typing-dot" style={{ width: 4, height: 4, borderRadius: "50%", background: "currentColor" }} />
+            <div className="typing-dot" style={{ width: 4, height: 4, borderRadius: "50%", background: "currentColor", animationDelay: "0.2s" }} />
+            <div className="typing-dot" style={{ width: 4, height: 4, borderRadius: "50%", background: "currentColor", animationDelay: "0.4s" }} />
+          </div>
+          Running
+        </span>
+      )}
       {t && t.input > 0 && (
         <span style={{ display: "flex", alignItems: "center", gap: 4 }}>
           <svg width="12" height="12" viewBox="0 0 10 10" fill="none" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" strokeLinejoin="round">

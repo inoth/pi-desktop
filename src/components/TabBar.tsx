@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { getFileIcon } from "./FileIcons";
 
 export interface Tab {
@@ -17,6 +17,13 @@ interface Props {
 }
 
 export function TabBar({ tabs, activeTabId, onSelectTab, onCloseTab }: Props) {
+  const [sessionRunning, setSessionRunning] = useState(false);
+
+  useEffect(() => {
+    const handleRunning = (e: Event) => setSessionRunning((e as CustomEvent).detail);
+    window.addEventListener("pi-session-running", handleRunning);
+    return () => window.removeEventListener("pi-session-running", handleRunning);
+  }, []);
   const [hoveredClose, setHoveredClose] = useState<string | null>(null);
 
   return (

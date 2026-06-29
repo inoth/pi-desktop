@@ -9,7 +9,7 @@ import { useAgentSession, type AgentPhase } from "@/hooks/useAgentSession";
 import { useAudio } from "@/hooks/useAudio";
 import { useDragDrop } from "@/hooks/useDragDrop";
 
-import { updateSessionStats, updateContextUsage } from "./SessionStatsBar";
+import { updateSessionStats, updateContextUsage, updateSessionRunning } from "./SessionStatsBar";
 
 interface Props {
   session: SessionInfo | null;
@@ -141,6 +141,10 @@ export function ChatWindow({ session, newSessionCwd, onAgentEnd, onSessionCreate
   const ctxKey = contextUsage
     ? `${contextUsage.percent ?? "null"}|${contextUsage.contextWindow}|${contextUsage.tokens ?? "null"}`
     : null;
+  useEffect(() => {
+    updateSessionRunning(agentRunning);
+  }, [agentRunning]);
+
   const contextUsageRef = useRef(contextUsage);
   contextUsageRef.current = contextUsage;
   useEffect(() => {
