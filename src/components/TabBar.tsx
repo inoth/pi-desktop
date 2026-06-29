@@ -1,7 +1,8 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState } from "react";
 import { getFileIcon } from "./FileIcons";
+import { useGlobalSessionContext } from "@/context/SessionContext";
 
 export interface Tab {
   id: string;
@@ -17,22 +18,9 @@ interface Props {
 }
 
 export function TabBar({ tabs, activeTabId, onSelectTab, onCloseTab }: Props) {
-  
-
-  const [runningSessions, setRunningSessions] = useState<Record<string, boolean>>({});
-  
-  useEffect(() => {
-    const handleRunningUpdate = (e: Event) => {
-      const { sessionId, running } = (e as CustomEvent).detail;
-      setRunningSessions(prev => ({
-        ...prev,
-        [sessionId]: running
-      }));
-    };
-    window.addEventListener("pi-session-running-status-update", handleRunningUpdate);
-    return () => window.removeEventListener("pi-session-running-status-update", handleRunningUpdate);
-  }, []);
+  const { runningSessions } = useGlobalSessionContext();
   const [hoveredClose, setHoveredClose] = useState<string | null>(null);
+
 
   return (
     <div

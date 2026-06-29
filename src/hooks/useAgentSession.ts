@@ -5,6 +5,7 @@ import type { AgentMessage, SessionInfo, SessionTreeNode } from "@/lib/types";
 import { normalizeToolCalls } from "@/lib/normalize";
 import { sendAgentCommand } from "@/lib/agent-client";
 import type { ToolEntry } from "@/components/ToolPanel";
+import { useGlobalSessionContext } from "@/context/SessionContext";
 
 export interface SessionData {
   sessionId: string;
@@ -105,37 +106,137 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
     modelsRefreshKey, onBranchDataChange, onSystemPromptChange,
   } = opts;
 
+  const { getSession, updateSession } = useGlobalSessionContext();
+  const sessionId = session?.id;
+  const globalState = sessionId ? getSession(sessionId) : null;
+
+  // Track which session this hook instance's state belongs to.
+  // This prevents the "transition render" from corrupting another session's state
+  // when AppShell updates the session prop but the component hasn't remounted yet.
+  const stateSessionIdRef = useRef(sessionId);
+  if (!stateSessionIdRef.current && sessionId) {
+    stateSessionIdRef.current = sessionId;
+  } else if (sessionId && stateSessionIdRef.current !== sessionId) {
+    // If sessionId changed, we should NOT sync our old state to the new sessionId
+    // This is handled by the useEffect check below.
+  }
+
   const isNew = session === null && newSessionCwd !== null;
 
-  const [data, setData] = useState<SessionData | null>(null);
-  const [loading, setLoading] = useState(!isNew);
+  const [data, setDataState] = useState<SessionData | null>(globalState?.data ?? null);
+  const [loading, setLoading] = useState(!isNew && !globalState);
   const [error, setError] = useState<string | null>(null);
-  const [activeLeafId, setActiveLeafId] = useState<string | null>(null);
-  const [messages, setMessages] = useState<AgentMessage[]>([]);
-  const [entryIds, setEntryIds] = useState<string[]>([]);
-  const [streamState, dispatch] = useReducer(streamReducer, { isStreaming: false, streamingMessage: null });
-  const [agentRunning, setAgentRunning] = useState(false);
+  const [activeLeafId, setActiveLeafIdState] = useState<string | null>(globalState?.activeLeafId ?? null);
+  const [messages, setMessagesState] = useState<AgentMessage[]>(globalState?.messages ?? []);
+  const [entryIds, setEntryIdsState] = useState<string[]>(globalState?.entryIds ?? []);
+  const [streamState, dispatch] = useReducer(streamReducer, globalState?.streamState ?? { isStreaming: false, streamingMessage: null });
+  const [agentRunning, setAgentRunningState] = useState(globalState?.agentRunning ?? false);
   const [modelNames, setModelNames] = useState<Record<string, string>>({});
   const [modelList, setModelList] = useState<{ id: string; name: string; provider: string }[]>([]);
   const [modelThinkingLevels, setModelThinkingLevels] = useState<Record<string, string[]>>({});
   const [modelThinkingLevelMaps, setModelThinkingLevelMaps] = useState<Record<string, Record<string, string | null>>>({});
   const [newSessionModel, setNewSessionModelState] = useState<{ provider: string; modelId: string } | null>(null);
-  const [toolPreset, setToolPreset] = useState<"none" | "default" | "full">("default");
-  const [thinkingLevel, setThinkingLevel] = useState<ThinkingLevelOption>("auto");
+  const [toolPreset, setToolPresetStateInternal] = useState<"none" | "default" | "full">(globalState?.toolPreset ?? "default");
+  const [thinkingLevel, setThinkingLevelState] = useState<ThinkingLevelOption>(globalState?.thinkingLevel ?? "auto");
   const [retryInfo, setRetryInfo] = useState<{ attempt: number; maxAttempts: number; errorMessage?: string } | null>(null);
-  const [contextUsage, setContextUsage] = useState<{ percent: number | null; contextWindow: number; tokens: number | null } | null>(null);
-  const [systemPrompt, setSystemPrompt] = useState<string | null>(null);
+  const [contextUsage, setContextUsageState] = useState<{ percent: number | null; contextWindow: number; tokens: number | null } | null>(globalState?.contextUsage ?? null);
+  const [systemPrompt, setSystemPromptState] = useState<string | null>(globalState?.systemPrompt ?? null);
   const [forkingEntryId, setForkingEntryId] = useState<string | null>(null);
   const [currentModelOverride, setCurrentModelOverride] = useState<{ provider: string; modelId: string } | null>(null);
   const [pendingModel, setPendingModel] = useState<{ provider: string; modelId: string } | null>(null);
-  const [isCompacting, setIsCompacting] = useState(false);
+  const [isCompacting, setIsCompactingState] = useState(globalState?.isCompacting ?? false);
   const [compactError, setCompactError] = useState<string | null>(null);
   const [compactResult, setCompactResult] = useState<CompactResultInfo | null>(null);
-  const [agentPhase, setAgentPhase] = useState<AgentPhase>(null);
+  const [agentPhase, setAgentPhaseState] = useState<AgentPhase>(globalState?.agentPhase ?? null);
+
+  const setData = useCallback((d: SessionData | null) => {
+    setDataState(d);
+  }, []);
+
+  const setActiveLeafId = useCallback((id: string | null) => {
+    setActiveLeafIdState(id);
+  }, []);
+
+  const setMessages = useCallback((msgs: AgentMessage[] | ((prev: AgentMessage[]) => AgentMessage[])) => {
+    setMessagesState(msgs);
+  }, []);
+
+  const setEntryIds = useCallback((ids: string[]) => {
+    setEntryIdsState(ids);
+  }, []);
+
+  const setAgentRunning = useCallback((running: boolean) => {
+    setAgentRunningState(running);
+  }, []);
+
+  const setThinkingLevel = useCallback((level: ThinkingLevelOption) => {
+    setThinkingLevelState(level);
+  }, []);
+
+  const setToolPreset = useCallback((preset: "none" | "default" | "full") => {
+    setToolPresetStateInternal(preset);
+  }, []);
+
+  const setContextUsage = useCallback((usage: any) => {
+    setContextUsageState(usage);
+  }, []);
+
+  const setSystemPrompt = useCallback((prompt: string | null) => {
+    setSystemPromptState(prompt);
+  }, []);
+
+  const setIsCompacting = useCallback((compacting: boolean) => {
+    setIsCompactingState(compacting);
+  }, []);
+
+  const setAgentPhase = useCallback((phase: AgentPhase | ((prev: AgentPhase) => AgentPhase)) => {
+    setAgentPhaseState(phase);
+  }, []);
+
+  // Sync state to global context in a controlled way via useEffect
+  useEffect(() => {
+    if (!sessionId || sessionId !== stateSessionIdRef.current) return;
+    updateSession(sessionId, {
+      data,
+      messages,
+      agentRunning,
+      streamState,
+      thinkingLevel,
+      toolPreset,
+      contextUsage,
+      systemPrompt,
+      isCompacting,
+      agentPhase,
+      activeLeafId,
+      entryIds,
+    });
+
+    // Broadcast running status for components like TabBar that listen via events
+    if (typeof window !== "undefined") {
+      window.dispatchEvent(new CustomEvent("pi-session-running-status-update", { 
+        detail: { sessionId, running: agentRunning } 
+      }));
+    }
+  }, [
+    sessionId,
+    data,
+    messages,
+    agentRunning,
+    streamState,
+    thinkingLevel,
+    toolPreset,
+    contextUsage,
+    systemPrompt,
+    isCompacting,
+    agentPhase,
+    activeLeafId,
+    entryIds,
+    updateSession // updateSession is now stable via useCallback in Context
+  ]);
 
   const eventSourceRef = useRef<EventSource | null>(null);
   const sessionIdRef = useRef<string | null>(session?.id ?? null);
-  const agentRunningRef = useRef(false);
+  const agentRunningRef = useRef(globalState?.agentRunning ?? false);
   const handleAgentEventRef = useRef<((event: { type: string; [key: string]: unknown }) => void) | null>(null);
   const initialScrollDoneRef = useRef(false);
   const lastUserMsgRef = useRef<HTMLDivElement | null>(null);
@@ -185,7 +286,21 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
       const d = data as SessionData & { agentState?: { running: boolean; state?: { isStreaming?: boolean; isCompacting?: boolean; contextUsage?: { percent: number | null; contextWindow: number; tokens: number | null } | null; systemPrompt?: string; thinkingLevel?: string } } };
       setData(d);
       setActiveLeafId(d.leafId);
-      setMessages((d as { context?: { messages: AgentMessage[]; entryIds: string[]; thinkingLevel?: string } }).context?.messages ?? []);
+      
+      const newMessages = (d as { context?: { messages: AgentMessage[]; entryIds: string[]; thinkingLevel?: string } }).context?.messages ?? [];
+      
+      setMessages((prev) => {
+        // If disk has fewer messages than we already have locally, 
+        // it's likely that the disk is lagging behind or we have optimistic updates.
+        // In this case, keep the local messages.
+        if (newMessages.length < prev.length) {
+          return prev;
+        }
+        // If they are the same length, we can still update to get potential metadata changes,
+        // but generally prev is fine.
+        return newMessages;
+      });
+
       setEntryIds((d as { context?: { messages: AgentMessage[]; entryIds: string[]; thinkingLevel?: string } }).context?.entryIds ?? []);
       setCurrentModelOverride(null);
       setError(null);
@@ -200,7 +315,7 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
     } finally {
       if (showLoading) setLoading(false);
     }
-  }, []);
+  }, [setData, setActiveLeafId, setThinkingLevel]);
 
   const loadContext = useCallback(async (sid: string, leafId: string | null) => {
     try {
@@ -210,7 +325,7 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
     } catch (e) {
       console.error("Failed to load context:", e);
     }
-  }, []);
+  }, [setMessages, setEntryIds]);
 
   const loadTools = useCallback(async (sid: string) => {
     try {
@@ -231,14 +346,18 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
       eventSourceRef.current = null;
     }
     
-        const cleanup = window.electron.on(`agent-event-${sid}`, ((event: { type: string; [key: string]: unknown }) => {
+    // Always sync latest session data from disk when connecting events
+    // to catch any messages that arrived while we were unmounted.
+    loadSession(sid);
+    
+    const cleanup = window.electron.on(`agent-event-${sid}`, ((event: { type: string; [key: string]: unknown }) => {
       try {
         handleAgentEventRef.current?.(event);
       } catch (e) {
         console.error("Agent event handler error:", e);
       }
     }) as (...args: unknown[]) => void);
-        eventSourceRef.current = cleanup as unknown as EventSource;
+    eventSourceRef.current = cleanup as unknown as EventSource;
     
     // Tell main process to subscribe and send events
     window.electron.invoke('agent-subscribe', sid).catch((e: Error) => {
@@ -268,6 +387,8 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
                agentRunningRef.current = false;
                setAgentPhase(null);
                dispatch({ type: "end" });
+               // Final sync if stopped
+               loadSession(sid);
              }
           } else if (data.running) {
              // Fallback if isStreaming is not explicitly in state but the session is running
@@ -275,6 +396,13 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
              agentRunningRef.current = true;
              setAgentPhase(prev => prev || { kind: "waiting_model" });
              dispatch({ type: "start" });
+          } else {
+             // Not running
+             setAgentRunning(false);
+             agentRunningRef.current = false;
+             setAgentPhase(null);
+             dispatch({ type: "end" });
+             loadSession(sid);
           }
         } else if (data.running) {
           // Absolute fallback if data.state is undefined but session is running
@@ -282,10 +410,17 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
           agentRunningRef.current = true;
           setAgentPhase(prev => prev || { kind: "waiting_model" });
           dispatch({ type: "start" });
+        } else {
+          // Not running
+          setAgentRunning(false);
+          agentRunningRef.current = false;
+          setAgentPhase(null);
+          dispatch({ type: "end" });
+          loadSession(sid);
         }
       }) as (value: unknown) => void)
       .catch(() => {});
-  }, []);
+  }, [setIsCompacting, setContextUsage, setSystemPrompt, setThinkingLevel, setAgentRunning, setAgentPhase, loadSession]);
 
   useEffect(() => {
     agentRunningRef.current = agentRunning;
@@ -382,7 +517,7 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
         }
         break;
     }
-  }, [loadSession, onAgentEnd]);
+  }, [loadSession, onAgentEnd, setAgentRunning, setAgentPhase, setMessages, setIsCompacting, setContextUsage, setSystemPrompt]);
   handleAgentEventRef.current = handleAgentEvent;
 
   const handleSend = useCallback(async (message: string, images?: AttachedImage[]) => {
@@ -414,7 +549,7 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
         const { PRESET_NONE, PRESET_DEFAULT, PRESET_FULL } = await import("@/components/ToolPanel");
         const toolNames = toolPreset === "none" ? PRESET_NONE : toolPreset === "default" ? PRESET_DEFAULT : PRESET_FULL;
         
-                const result = await window.electron.invoke('agent-new', {
+        const result = await window.electron.invoke('agent-new', {
           cwd: newSessionCwd,
           type: "prompt",
           message,
@@ -426,6 +561,14 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
         if (!(result as { success?: boolean }).success) throw new Error("Failed to create agent session");
         const realId = (result as { sessionId: string }).sessionId;
         sessionIdRef.current = realId;
+        
+        // Immediate sync to global context so that when AppShell triggers a re-render
+        // with the new session ID, the new mount will see the current local state.
+        updateSession(realId, {
+          data, messages: [...messages, userMsg], agentRunning: true, streamState, thinkingLevel, toolPreset,
+          contextUsage, systemPrompt, isCompacting, agentPhase: { kind: "waiting_model" }, activeLeafId, entryIds,
+        });
+
         connectEvents(realId);
         onSessionCreated?.({
           id: realId,
@@ -452,7 +595,7 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
       setAgentPhase(null);
       dispatch({ type: "end" });
     }
-  }, [isNew, newSessionCwd, newSessionModel, toolPreset, thinkingLevel, session, agentRunning, connectEvents, onSessionCreated]);
+  }, [isNew, newSessionCwd, newSessionModel, toolPreset, thinkingLevel, session, agentRunning, connectEvents, onSessionCreated, setMessages, setAgentRunning, setAgentPhase]);
 
   const handleAbort = useCallback(async () => {
     const sid = sessionIdRef.current;
@@ -490,7 +633,7 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
     sendAgentCommand(sid, { type: "navigate_tree", targetId: entryId }).catch(() => {});
     setActiveLeafId(entryId);
     await loadContext(sid, entryId);
-  }, [loadContext]);
+  }, [loadContext, setActiveLeafId]);
 
   const handleLeafChange = useCallback(async (leafId: string | null) => {
     setActiveLeafId(leafId);
@@ -500,7 +643,7 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
     if (leafId) {
       sendAgentCommand(sid, { type: "navigate_tree", targetId: leafId }).catch(() => {});
     }
-  }, [loadContext]);
+  }, [loadContext, setActiveLeafId]);
 
   const handleModelChange = useCallback(async (provider: string, modelId: string) => {
     if (isNew) {
@@ -533,7 +676,7 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
     } finally {
       setIsCompacting(false);
     }
-  }, [isCompacting, loadSession]);
+  }, [isCompacting, loadSession, setIsCompacting]);
 
   const handleSteer = useCallback(async (message: string, images?: AttachedImage[]) => {
     const sid = sessionIdRef.current;
@@ -549,7 +692,7 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
     } catch (e) {
       console.error("Failed to steer:", e);
     }
-  }, []);
+  }, [setMessages]);
 
   const handleFollowUp = useCallback(async (message: string, images?: AttachedImage[]) => {
     const sid = sessionIdRef.current;
@@ -565,7 +708,7 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
     } catch (e) {
       console.error("Failed to follow up:", e);
     }
-  }, []);
+  }, [setMessages]);
 
   const handleAbortCompaction = useCallback(async () => {
     const sid = sessionIdRef.current;
@@ -587,7 +730,7 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
     } catch (e) {
       console.error("Failed to set thinking level:", e);
     }
-  }, []);
+  }, [setThinkingLevel]);
 
   const handleToolPresetChange = useCallback(async (preset: "none" | "default" | "full") => {
     const { PRESET_NONE, PRESET_DEFAULT, PRESET_FULL } = await import("@/components/ToolPanel");
@@ -635,32 +778,53 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
   useEffect(() => {
     if (session) {
       sessionIdRef.current = session.id;
-      loadSession(session.id, true, true).then((agentState) => {
-        if (agentState?.running) {
-          loadTools(session.id);
-          connectEvents(session.id); // connectEvents will fetch latest streaming state
-          
-          // Ensure local state reflects that it is running
-          setAgentRunning(true);
-          agentRunningRef.current = true;
-          
-          // Only start stream and waiting_model if we don't already have streaming state
-          // from the loadSession call we just made
-          if (!agentState?.state?.isStreaming) {
-             setAgentPhase({ kind: "waiting_model" });
-             dispatch({ type: "start" });
-          } else if (agentState?.state?.isStreaming && (agentState.state as any).streamingMessage) {
-             dispatch({ type: "start" });
-             dispatch({ type: "update", message: normalizeToolCalls((agentState.state as any).streamingMessage as AgentMessage) });
+      // If we don't have global state, or if the global state doesn't have data, load it
+      if (!globalState || !globalState.data) {
+        // If we already have messages locally (e.g. from handleSend in the same hook instance), 
+        // don't show full-screen loading.
+        const shouldShowLoading = messages.length === 0;
+        loadSession(session.id, shouldShowLoading, true).then((agentState) => {
+          if (agentState?.running) {
+            loadTools(session.id);
+            connectEvents(session.id); // connectEvents will fetch latest streaming state
+            
+            // Ensure local state reflects that it is running
+            setAgentRunning(true);
+            agentRunningRef.current = true;
+            
+            // Only start stream and waiting_model if we don't already have streaming state
+            // from the loadSession call we just made
+            if (!agentState?.state?.isStreaming) {
+               setAgentPhase({ kind: "waiting_model" });
+               dispatch({ type: "start" });
+            } else if (agentState?.state?.isStreaming && (agentState.state as any).streamingMessage) {
+               dispatch({ type: "start" });
+               dispatch({ type: "update", message: normalizeToolCalls((agentState.state as any).streamingMessage as AgentMessage) });
+            }
           }
-        }
-        if (agentState?.state) {
-          if (agentState.state.isCompacting !== undefined) setIsCompacting(agentState.state.isCompacting);
-          if (agentState.state.contextUsage !== undefined) setContextUsage(agentState.state.contextUsage ?? null);
-          if (agentState.state.systemPrompt !== undefined) setSystemPrompt(agentState.state.systemPrompt ?? null);
-          if (agentState.state.thinkingLevel !== undefined) setThinkingLevel((agentState.state.thinkingLevel as ThinkingLevelOption) ?? "auto");
-        }
-      });
+          if (agentState?.state) {
+            if (agentState.state.isCompacting !== undefined) setIsCompacting(agentState.state.isCompacting);
+            if (agentState.state.contextUsage !== undefined) setContextUsage(agentState.state.contextUsage ?? null);
+            if (agentState.state.systemPrompt !== undefined) setSystemPrompt(agentState.state.systemPrompt ?? null);
+            if (agentState.state.thinkingLevel !== undefined) setThinkingLevel((agentState.state.thinkingLevel as ThinkingLevelOption) ?? "auto");
+          }
+        });
+      } else {
+        // We have global state, sync latest session data from disk and connect events
+        loadSession(session.id, false, true).then((agentState) => {
+          if (agentState?.running || globalState.agentRunning) {
+            connectEvents(session.id);
+            setAgentRunning(true);
+            agentRunningRef.current = true;
+          } else {
+            // Only stop if both backend and global state say it's stopped
+            setAgentRunning(false);
+            agentRunningRef.current = false;
+            setAgentPhase(null);
+            dispatch({ type: "end" });
+          }
+        });
+      }
     }
     return () => {
       if (typeof window !== "undefined" && ('electron' in window)) {
@@ -676,7 +840,7 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
       }
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [sessionId]); // Re-run when sessionId changes
 
   useEffect(() => {
     onSystemPromptChange?.(systemPrompt);
@@ -727,7 +891,7 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
   // Load model list
   useEffect(() => {
     // 桌面端使用 IPC 调用
-        window.electron.invoke('get-models').then(((d: unknown) => {
+    window.electron.invoke('get-models').then(((d: unknown) => {
       const data = d as { models: Record<string, string>; thinkingLevels?: Record<string, string[]>; thinkingLevelMaps?: Record<string, Record<string, string | null>>; modelList?: { id: string; name: string; provider: string }[]; defaultModel?: { provider: string; modelId: string } };
       setModelNames(data.models);
       if (data.thinkingLevels) setModelThinkingLevels(data.thinkingLevels);
@@ -736,14 +900,14 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
         setModelList(data.modelList);
         if (isNew && data.modelList.length > 0) {
           const def = data.defaultModel;
-                    const match = def && data.modelList.find((m: { id: string, provider: string }) => m.id === def.modelId && m.provider === def.provider);
+          const match = def && data.modelList.find((m: { id: string, provider: string }) => m.id === def.modelId && m.provider === def.provider);
           const selected = match
             ? { provider: match.provider, modelId: match.id }
             : { provider: data.modelList[0].provider, modelId: data.modelList[0].id };
           setNewSessionModel(selected);
         }
       }
-        }) as (value: unknown) => void).catch(() => {});
+    }) as (value: unknown) => void).catch(() => {});
   }, [isNew, modelsRefreshKey, setNewSessionModel]);
 
   // Compact error auto-dismiss

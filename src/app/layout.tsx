@@ -14,6 +14,8 @@ export const metadata: Metadata = {
   description: "Pi Desktop application",
 };
 
+import { SessionProvider } from "@/context/SessionContext";
+
 export default function RootLayout({
   children,
 }: {
@@ -29,7 +31,9 @@ export default function RootLayout({
         />
       </head>
       <body style={{ height: "100dvh", display: "flex", flexDirection: "column" }}>
-        {children}
+        <SessionProvider>
+          {children}
+        </SessionProvider>
       </body>
     </html>
   );

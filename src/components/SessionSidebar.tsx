@@ -3,6 +3,7 @@
 import { useEffect, useState, useCallback, useRef } from "react";
 import type { SessionInfo } from "@/lib/types";
 import { FileExplorer } from "./FileExplorer";
+import { useGlobalSessionContext } from "@/context/SessionContext";
 
 interface Props {
   selectedSessionId: string | null;
@@ -10,7 +11,6 @@ interface Props {
   onNewSession?: (sessionId: string, cwd: string) => void;
   initialSessionId?: string | null;
   onInitialRestoreDone?: () => void;
-  refreshKey?: number;
   onSessionDeleted?: (sessionId: string) => void;
   selectedCwd?: string | null;
   onCwdChange?: (cwd: string | null) => void;
@@ -196,10 +196,8 @@ function PiAgentTitle() {
   );
 }
 
-export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSession, initialSessionId, onInitialRestoreDone, refreshKey, onSessionDeleted, selectedCwd: selectedCwdProp, onCwdChange, onOpenFile, explorerRefreshKey, onAtMention }: Props) {
-  const [allSessions, setAllSessions] = useState<SessionInfo[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
+export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSession, initialSessionId, onInitialRestoreDone, onSessionDeleted, selectedCwd: selectedCwdProp, onCwdChange, onOpenFile, explorerRefreshKey, onAtMention }: Props) {
+  const { sessions: allSessions, loadingSessions: loading, sessionsError: error, refreshSessions: loadSessions, runningSessions } = useGlobalSessionContext();
   const [selectedCwd, setSelectedCwd] = useState<string | null>(null);
   const [homeDir, setHomeDir] = useState<string>("");
   const [dropdownOpen, setDropdownOpen] = useState(false);
@@ -216,36 +214,11 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
   const sessionRefreshTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const explorerRefreshTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  const loadSessions = useCallback(async (showLoading = false) => {
-    try {
-      if (showLoading) setLoading(true);
-      const data = await window.electron.invoke('get-sessions');
-      setAllSessions((data as { sessions: SessionInfo[] }).sessions);
-      setError(null);
-      if (!showLoading) {
-        setSessionRefreshDone(true);
-        if (sessionRefreshTimerRef.current) clearTimeout(sessionRefreshTimerRef.current);
-        sessionRefreshTimerRef.current = setTimeout(() => setSessionRefreshDone(false), 2000);
-      }
-    } catch (e) {
-      setError(String(e));
-    } finally {
-      if (showLoading) setLoading(false);
-    }
-  }, []);
-
-  const initialLoadDone = useRef(false);
-  useEffect(() => {
-    const isFirst = !initialLoadDone.current;
-    initialLoadDone.current = true;
-    loadSessions(isFirst);
-  }, [loadSessions, refreshKey]);
-
-  useEffect(() => {
-    const cleanup = window.electron.on('sessions-changed', () => {
-      loadSessions(false);
-    });
-    return cleanup;
+  const handleRefreshSessions = useCallback(async () => {
+    await loadSessions(false);
+    setSessionRefreshDone(true);
+    if (sessionRefreshTimerRef.current) clearTimeout(sessionRefreshTimerRef.current);
+    sessionRefreshTimerRef.current = setTimeout(() => setSessionRefreshDone(false), 2000);
   }, [loadSessions]);
 
   useEffect(() => {
@@ -432,7 +405,7 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
               New
             </button>
             <button
-              onClick={() => loadSessions(false)}
+              onClick={handleRefreshSessions}
               style={{
                 display: "flex", alignItems: "center", justifyContent: "center",
                 background: sessionRefreshDone ? "rgba(74,222,128,0.18)" : "var(--bg-hover)",
@@ -730,10 +703,10 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
             node={node}
             selectedSessionId={selectedSessionId}
             onSelectSession={onSelectSession}
-            onRenamed={loadSessions}
+            onRenamed={handleRefreshSessions}
             onSessionDeleted={(id) => {
               onSessionDeleted?.(id);
-              loadSessions();
+              handleRefreshSessions();
             }}
             depth={0}
           />
@@ -846,6 +819,7 @@ function SessionTreeItem({
   onSessionDeleted?: (id: string) => void;
   depth: number;
 }) {
+  const { runningSessions } = useGlobalSessionContext();
   const [collapsed, setCollapsed] = useState(false);
   const hasChildren = node.children.length > 0;
 
@@ -865,6 +839,7 @@ function SessionTreeItem({
         )}
         <SessionItem
           session={node.session}
+          isRunning={runningSessions[node.session.id] ?? false}
           isSelected={node.session.id === selectedSessionId}
           onClick={() => onSelectSession(node.session)}
           onRenamed={onRenamed}
@@ -896,6 +871,7 @@ function SessionTreeItem({
 
 function SessionItem({
   session,
+  isRunning = false,
   isSelected,
   onClick,
   onRenamed,
@@ -906,6 +882,7 @@ function SessionItem({
   onToggleCollapse,
 }: {
   session: SessionInfo;
+  isRunning?: boolean;
   isSelected: boolean;
   onClick: () => void;
   onRenamed?: () => void;
@@ -931,14 +908,14 @@ function SessionItem({
 
   const [now, setNow] = useState(() => Date.now());
   useEffect(() => {
-    if (session.running === false && session.modified) {
+    if (isRunning === false && session.modified) {
       const msAgo = Date.now() - new Date(session.modified).getTime();
       if (msAgo < 60000) {
         const timer = setTimeout(() => setNow(Date.now()), 60000 - msAgo);
         return () => clearTimeout(timer);
       }
     }
-  }, [session.running, session.modified]);
+  }, [isRunning, session.modified]);
 
   const title = session.name || session.firstMessage.slice(0, 50) || session.id.slice(0, 12);
 
@@ -1104,7 +1081,7 @@ function SessionItem({
               title={title}
             >
               {title}
-              {session.running && (
+              {isRunning && (
                 <div style={{
                   display: "flex", gap: 3, alignItems: "center",
                   background: "var(--bg-panel)", padding: "2px 5px",
@@ -1115,7 +1092,7 @@ function SessionItem({
                   <div className="typing-dot" style={{ width: 4, height: 4, borderRadius: "50%", background: "var(--accent)", animationDelay: "0.4s" }} />
                 </div>
               )}
-              {session.running === false && session.modified && session.modified !== seenModified && now - new Date(session.modified).getTime() < 60000 && (
+              {isRunning === false && session.modified && session.modified !== seenModified && now - new Date(session.modified).getTime() < 60000 && (
                 <div style={{
                   width: 6, height: 6, borderRadius: "50%",
                   background: "#4ade80", flexShrink: 0,

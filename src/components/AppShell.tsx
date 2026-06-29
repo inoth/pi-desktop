@@ -21,7 +21,6 @@ export function AppShell() {
   const [selectedSession, setSelectedSession] = useState<SessionInfo | null>(null);
   // When user clicks +, we only store the cwd — no fake session id
   const [newSessionCwd, setNewSessionCwd] = useState<string | null>(null);
-  const [refreshKey, setRefreshKey] = useState(0);
   const [sessionKey, setSessionKey] = useState(0);
   const [explorerRefreshKey, setExplorerRefreshKey] = useState(0);
   const [modelsConfigOpen, setModelsConfigOpen] = useState(false);
@@ -127,7 +126,6 @@ export function AppShell() {
     setSessionKey((k) => k + 1);
     setSystemPrompt(null);
     setInitialSessionRestored(true);
-    setRefreshKey((k) => k + 1);
     if (isRestore) {
       // Suppress the redundant sessionKey bump that would come from the
       // onCwdChange effect firing after setSelectedCwd in the sidebar
@@ -167,7 +165,6 @@ export function AppShell() {
   const handleSessionCreated = useCallback((session: SessionInfo) => {
     setNewSessionCwd(null);
     setSelectedSession(session);
-    setRefreshKey((k) => k + 1);
     if (typeof window !== "undefined" && !window.location.protocol.startsWith("app")) {
       router.replace(`?session=${encodeURIComponent(session.id)}`, { scroll: false });
     } else {
@@ -178,12 +175,10 @@ export function AppShell() {
   }, [router]);
 
   const handleAgentEnd = useCallback(() => {
-    setRefreshKey((k) => k + 1);
     setExplorerRefreshKey((k) => k + 1);
   }, []);
 
   const handleSessionForked = useCallback((newSessionId: string) => {
-    setRefreshKey((k) => k + 1);
     setSessionKey((k) => k + 1);
     setNewSessionCwd(null);
     setSelectedSession((prev) => ({
@@ -204,7 +199,6 @@ export function AppShell() {
   }, []);
 
   const handleSessionDeleted = useCallback((sessionId: string) => {
-    setRefreshKey((k) => k + 1);
     if (selectedSession?.id === sessionId) {
       const cwd = selectedSession.cwd;
       setNewSessionCwd(cwd ?? null);
@@ -270,7 +264,6 @@ export function AppShell() {
         onNewSession={handleNewSession}
         initialSessionId={initialSessionId}
         onInitialRestoreDone={handleInitialRestoreDone}
-        refreshKey={refreshKey}
         onSessionDeleted={handleSessionDeleted}
         selectedCwd={selectedSession?.cwd ?? newSessionCwd ?? null}
         onCwdChange={handleCwdChange}

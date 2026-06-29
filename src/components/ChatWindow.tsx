@@ -143,13 +143,7 @@ export function ChatWindow({ session, newSessionCwd, onAgentEnd, onSessionCreate
     : null;
   useEffect(() => {
     updateSessionRunning(agentRunning);
-    // Send a "session-running-status-update" to inform AppShell about this specific session's state
-    if (typeof window !== "undefined" && session?.id) {
-      window.dispatchEvent(new CustomEvent("pi-session-running-status-update", { 
-        detail: { sessionId: session.id, running: agentRunning } 
-      }));
-    }
-  }, [agentRunning, session?.id]);
+  }, [agentRunning]);
 
   useEffect(() => {
     return () => {
