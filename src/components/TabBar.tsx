@@ -18,7 +18,7 @@ interface Props {
 }
 
 export function TabBar({ tabs, activeTabId, onSelectTab, onCloseTab }: Props) {
-  const { runningSessions } = useGlobalSessionContext();
+  const { runningSessions, completedSessions } = useGlobalSessionContext();
   const [hoveredClose, setHoveredClose] = useState<string | null>(null);
 
 
@@ -35,6 +35,11 @@ export function TabBar({ tabs, activeTabId, onSelectTab, onCloseTab }: Props) {
     >
       {tabs.map((tab) => {
         const isActive = tab.id === activeTabId;
+        const sessionId = tab.id.startsWith('session:') ? tab.id.replace('session:', '') : null;
+        const isRunning = sessionId ? runningSessions[sessionId] : false;
+        const completedAt = sessionId ? completedSessions[sessionId] : undefined;
+        const completedAgeMs = completedAt ? Date.now() - completedAt : 0;
+        const showCompleted = !!sessionId && !isRunning && !!completedAt && completedAgeMs < 60000;
         return (
           <div
             key={tab.id}
@@ -73,7 +78,7 @@ export function TabBar({ tabs, activeTabId, onSelectTab, onCloseTab }: Props) {
             >
               {tab.label}
             </span>
-            {tab.id.startsWith('session:') && runningSessions[tab.id.replace('session:', '')] && (
+            {isRunning && (
               <div style={{
                 display: "flex", gap: 3, alignItems: "center",
                 background: "transparent", padding: "0 2px",
@@ -83,6 +88,21 @@ export function TabBar({ tabs, activeTabId, onSelectTab, onCloseTab }: Props) {
                 <div className="typing-dot" style={{ width: 4, height: 4, borderRadius: "50%", background: "var(--accent)", animationDelay: "0.2s" }} />
                 <div className="typing-dot" style={{ width: 4, height: 4, borderRadius: "50%", background: "var(--accent)", animationDelay: "0.4s" }} />
               </div>
+            )}
+            {showCompleted && (
+              <div
+                title="Completed recently"
+                className="completed-dot"
+                style={{
+                  width: 6,
+                  height: 6,
+                  borderRadius: "50%",
+                  background: "#4ade80",
+                  flexShrink: 0,
+                  boxShadow: "0 0 4px rgba(74,222,128,0.5)",
+                  animationDelay: `-${completedAgeMs / 1000}s`,
+                }}
+              />
             )}
             <button
               onClick={(e) => { e.stopPropagation(); onCloseTab(tab.id); }}

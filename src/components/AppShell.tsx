@@ -243,6 +243,21 @@ export function AppShell() {
     });
   }, [fileTabs]);
 
+  const handleCloseSessionTab = useCallback(() => {
+    setSelectedSession(null);
+    setNewSessionCwd(null);
+    setSessionKey((k) => k + 1);
+    setBranchTree([]);
+    setBranchActiveLeafId(null);
+    setSystemPrompt(null);
+    setActiveTopPanel(null);
+    if (typeof window !== "undefined" && !window.location.protocol.startsWith("app")) {
+      router.replace("/", { scroll: false });
+    } else if (typeof window !== "undefined") {
+      window.history.pushState(null, "", "/");
+    }
+  }, [router]);
+
   const handleExportSession = useCallback(() => {
     if (!selectedSession) return;
     window.electron.invoke('export-session', selectedSession.id);
@@ -255,6 +270,20 @@ export function AppShell() {
   const showPlaceholder = initialSessionRestored && !showChat;
 
   const activeFileTab = fileTabs.find((t) => t.id === activeFileTabId) ?? null;
+  const sessionTabs: Tab[] = selectedSession
+    ? [{
+        id: `session:${selectedSession.id}`,
+        label: selectedSession.name || selectedSession.firstMessage.slice(0, 50) || selectedSession.id.slice(0, 12),
+        filePath: selectedSession.path || selectedSession.cwd,
+      }]
+    : effectiveNewSessionCwd
+      ? [{
+          id: `new-session:${effectiveNewSessionCwd}`,
+          label: "New session",
+          filePath: effectiveNewSessionCwd,
+        }]
+      : [];
+  const activeSessionTabId = sessionTabs[0]?.id ?? "";
 
   const sidebarContent = (
     <>
@@ -413,6 +442,16 @@ export function AppShell() {
               </svg>
             )}
           </button>
+          {showChat && (
+            <div style={{ height: "100%", minWidth: 120, maxWidth: 280, flex: "0 1 280px", overflow: "hidden" }}>
+              <TabBar
+                tabs={sessionTabs}
+                activeTabId={activeSessionTabId}
+                onSelectTab={() => {}}
+                onCloseTab={handleCloseSessionTab}
+              />
+            </div>
+          )}
           {showChat && (
             <div style={{ display: "flex", alignItems: "stretch", height: "100%" }}>
               <button

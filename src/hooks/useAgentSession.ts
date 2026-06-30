@@ -211,11 +211,20 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
       entryIds,
     });
 
-    // Broadcast running status for components like TabBar that listen via events
+    // Broadcast running status for components like TabBar that listen via events.
+    // Only emit on transitions so a completed marker is not refreshed by unrelated state syncs.
     if (typeof window !== "undefined") {
-      window.dispatchEvent(new CustomEvent("pi-session-running-status-update", { 
-        detail: { sessionId, running: agentRunning } 
-      }));
+      const previousRunning = lastBroadcastRunningRef.current;
+      if (previousRunning !== agentRunning) {
+        lastBroadcastRunningRef.current = agentRunning;
+        window.dispatchEvent(new CustomEvent("pi-session-running-status-update", {
+          detail: {
+            sessionId,
+            running: agentRunning,
+            completedAt: previousRunning === true && !agentRunning ? Date.now() : undefined,
+          }
+        }));
+      }
     }
   }, [
     sessionId,
@@ -237,6 +246,7 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
   const eventSourceRef = useRef<EventSource | null>(null);
   const sessionIdRef = useRef<string | null>(session?.id ?? null);
   const agentRunningRef = useRef(globalState?.agentRunning ?? false);
+  const lastBroadcastRunningRef = useRef<boolean | null>(globalState?.agentRunning ?? null);
   const handleAgentEventRef = useRef<((event: { type: string; [key: string]: unknown }) => void) | null>(null);
   const initialScrollDoneRef = useRef(false);
   const lastUserMsgRef = useRef<HTMLDivElement | null>(null);
